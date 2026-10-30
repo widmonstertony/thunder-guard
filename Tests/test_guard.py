@@ -2,6 +2,7 @@ import importlib.util
 import json
 import pathlib
 import plistlib
+import sqlite3
 import tempfile
 import unittest
 from unittest import mock
@@ -101,6 +102,20 @@ class GuardTests(unittest.TestCase):
         self.assertIn(('240e:940:a03:a00::1', '443'), allowed)
         self.assertNotIn(('*', '1500'), allowed)
         self.assertNotIn(('111.63.172.45', '80'), allowed)
+
+    def test_active_cloud_hosts_ignores_peer_urls_and_private_link_parameters(self):
+        db_path = self.root / 'tasks.db'
+        with sqlite3.connect(db_path) as db:
+            db.execute('CREATE TABLE etm_task (state INTEGER, create_time INTEGER, create_param TEXT)')
+            tasks = [
+                (1, 3, {'source': 'cloud/getback', 'url': 'https://vod0418-z01-vip-lixian.xunlei.com/download?token=secret'}),
+                (1, 2, {'source': 'cloud/getback', 'url': 'https://peer.example.com/download'}),
+                (1, 1, {'source': 'url', 'url': 'https://vod0999-z01-vip-lixian.xunlei.com/download'}),
+            ]
+            db.executemany('INSERT INTO etm_task VALUES (?, ?, ?)',
+                           [(state, created, json.dumps(task)) for state, created, task in tasks])
+        self.assertEqual(guard.active_cloud_hosts(db_path),
+                         ['vod0418-z01-vip-lixian.xunlei.com'])
 
 
 if __name__ == '__main__':

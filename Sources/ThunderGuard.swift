@@ -10,6 +10,8 @@ struct ThunderGuardApp: App {
                     .tabItem { Label("网络总览", systemImage: "chart.xyaxis.line") }
                 GuardView()
                     .tabItem { Label("迅雷规则", systemImage: "shield.lefthalf.filled") }
+                CloudMagnetView()
+                    .tabItem { Label("磁力云添加", systemImage: "cloud.badge.plus") }
             }
         }
     }
@@ -28,6 +30,7 @@ private struct GuardAudit: Decodable {
     let dnsServers: [String]
     let dnsExceptionsPresent: Bool
     let cloudHosts: [String]
+    let activeCloudHosts: [String]
     let cloudExceptionsPresent: Bool
     let globalAllowList: Bool
     let localhostBypass: Bool
@@ -59,6 +62,10 @@ struct GuardView: View {
                             .lineLimit(3...6)
                             .textFieldStyle(.roundedBorder)
                         Text("云盘 CDN 主机名（仅支持已核实的 vod…-vip-lixian.xunlei.com；生成时解析为精确 IP:443 规则）")
+                        if let active = audit?.activeCloudHosts, !active.isEmpty {
+                            Text("当前取回任务：\(active.joined(separator: "、"))")
+                                .font(.caption).textSelection(.enabled)
+                        }
                         TextField("云盘 CDN 主机名，每行一个", text: $cloudHosts, axis: .vertical)
                             .lineLimit(2...4)
                             .textFieldStyle(.roundedBorder)
@@ -72,7 +79,7 @@ struct GuardView: View {
                                 }
                             }
                         }
-                        Text("已备份原规则。请在 LuLu 菜单栏图标的 Rules 菜单中导入生成的 JSON，然后点“重新检查”。")
+                        Text("会自动识别正在取回的云盘 CDN。新任务若停在 0%，生成规则后在 LuLu 菜单栏图标的 Rules 菜单中导入 JSON，再点“重新检查”。")
                             .font(.caption).foregroundStyle(.secondary)
                     }.frame(maxWidth: .infinity, alignment: .leading).padding(8)
                 }
@@ -163,7 +170,9 @@ struct GuardView: View {
         do {
             audit = try JSONDecoder().decode(GuardAudit.self, from: run(["audit"]))
             if endpoints.isEmpty { endpoints = audit?.allowEndpoints.joined(separator: "\n") ?? "" }
-            if cloudHosts.isEmpty { cloudHosts = audit?.cloudHosts.joined(separator: "\n") ?? "" }
+            let entered = cloudHosts.split(whereSeparator: \.isNewline).map(String.init)
+            cloudHosts = Array(NSOrderedSet(array: entered + (audit?.cloudHosts ?? [])))
+                .compactMap { $0 as? String }.joined(separator: "\n")
             let count = audit?.components.filter(\.fallbackBlock).count ?? 0
             message = "找到 \(audit?.components.count ?? 0) 个迅雷组件；其中 \(count) 个具有默认拦截规则。"
         } catch { message = error.localizedDescription }
@@ -171,6 +180,7 @@ struct GuardView: View {
 
     private func buildRules() {
         do {
+            refresh()
             let hosts = endpoints.split(whereSeparator: { $0 == "\n" || $0 == "," }).map(String.init)
             let clouds = cloudHosts.split(whereSeparator: { $0 == "\n" || $0 == "," }).map(String.init)
             let args = ["prepare"] + hosts.flatMap { ["--allow", $0] } + clouds.flatMap { ["--cloud-host", $0] }

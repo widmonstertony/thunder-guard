@@ -8,8 +8,10 @@ import pathlib
 import plistlib
 import re
 import shutil
+import sqlite3
 import subprocess
 import sys
+import urllib.parse
 import uuid
 
 ROOT = pathlib.Path('/Library/Objective-See/LuLu')
@@ -19,6 +21,7 @@ STATE = pathlib.Path.home() / 'Library' / 'Application Support' / 'ThunderGuard'
 TEAM = 'SXKSDVK696'
 DEFAULT_CLOUD_HOSTS = ['vod3429-aliyun04-vip-lixian.xunlei.com']
 RULES = ROOT / 'rules.plist'
+TASK_DB = pathlib.Path.home() / 'Library/Application Support/Thunder/etm3/etm_map.db'
 COMPONENTS = [
     APP / 'Contents/MacOS/Thunder',
     APP / 'Contents/XPCServices/DownloadService.xpc/Contents/MacOS/DownloadService',
@@ -195,6 +198,31 @@ def valid_cloud_host(value):
     return value
 
 
+def active_cloud_hosts(db_path=TASK_DB):
+    """Read only the CDN hostname for active cloud retrievals; never expose signed URLs."""
+    if not db_path.is_file():
+        return []
+    hosts = set()
+    try:
+        with sqlite3.connect(db_path.as_uri() + '?mode=ro', uri=True, timeout=1) as db:
+            rows = db.execute('SELECT create_param FROM etm_task WHERE state IN (1, 2) '
+                              'ORDER BY create_time DESC LIMIT 100')
+            for (raw,) in rows:
+                try:
+                    task = json.loads(raw)
+                    if task.get('source') != 'cloud/getback':
+                        continue
+                    url = urllib.parse.urlsplit(task.get('url', ''))
+                    if url.scheme != 'https' or url.port not in (None, 443):
+                        continue
+                    hosts.add(valid_cloud_host(url.hostname or ''))
+                except (TypeError, ValueError, AttributeError):
+                    continue
+    except sqlite3.Error:
+        return []
+    return sorted(hosts)
+
+
 def resolve_cloud_host(host):
     try:
         result = subprocess.run(['/usr/bin/dscacheutil', '-q', 'host', '-a', 'name', host],
@@ -292,6 +320,8 @@ def audit():
         cloud_hosts = manifest.get('cloudHosts') or DEFAULT_CLOUD_HOSTS
     except (OSError, ValueError):
         cloud_hosts = DEFAULT_CLOUD_HOSTS
+    active_hosts = active_cloud_hosts()
+    cloud_hosts = list(dict.fromkeys(cloud_hosts + active_hosts))
     cloud_ok = bool(cloud_hosts)
     cloud_ips = set()
     for host in cloud_hosts:
@@ -331,6 +361,7 @@ def audit():
             'dnsServers': current_dns,
             'dnsExceptionsPresent': dns_ok,
             'cloudHosts': cloud_hosts,
+            'activeCloudHosts': active_hosts,
             'cloudExceptionsPresent': cloud_ok,
             'globalAllowList': bool(prefs.get('useAllowList', False)),
             'localhostBypass': bool(prefs.get('allowLocalHost', False)),
