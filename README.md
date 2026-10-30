@@ -17,7 +17,7 @@ The package is unsigned and Thunder Guard is ad hoc signed. macOS may require th
 
 The dashboard reads one-shot CSV samples from macOS's built-in `nettop` every three seconds. Rates are differences in process byte counters, and the chart retains about three minutes of history while the window is open. It does not record traffic content or upload snapshots. Blocked attempts are generally absent from `nettop`; use LuLu logs to verify blocks.
 
-The current policy only controls Thunder and its helpers. It does not automatically classify or block P2P for every app. Allowed HTTPS may carry traffic that cannot be classified from an IP address and port. CDN IPs can change; regenerate and import rules after such changes.
+The strict cloud policy gives DownloadService DNS access and precise IP:443 access only to verified `vod…-vip-lixian.xunlei.com` hosts found in active cloud retrieval tasks. The Thunder UI process retains its cloud control endpoints. The rules tab also shows Thunder's own `origin_bytes`, `p2p_Bytes`, and `dcdn_Bytes` counters for active cloud retrievals. The current policy only controls Thunder and its helpers. It does not classify P2P for every app, and neither the firewall nor Thunder's counters can prove the semantic content of encrypted HTTPS. CDN IPs can change; regenerate and import rules after such changes.
 
 ## Build
 

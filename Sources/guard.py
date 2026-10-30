@@ -223,6 +223,30 @@ def active_cloud_hosts(db_path=TASK_DB):
     return sorted(hosts)
 
 
+def active_cloud_counters(db_path=TASK_DB):
+    """Return Thunder's own transfer counters for active cloud retrieval tasks."""
+    totals = {'origin': 0, 'p2p': 0, 'dcdn': 0}
+    if not db_path.is_file():
+        return totals
+    try:
+        with sqlite3.connect(db_path.as_uri() + '?mode=ro', uri=True, timeout=1) as db:
+            rows = db.execute('SELECT create_param, origin_bytes, p2p_Bytes, dcdn_Bytes '
+                              'FROM etm_task WHERE state IN (1, 2)')
+            for raw, origin, p2p, dcdn in rows:
+                try:
+                    task = json.loads(raw)
+                except (TypeError, ValueError):
+                    continue
+                if task.get('source') != 'cloud/getback':
+                    continue
+                totals['origin'] += max(0, origin or 0)
+                totals['p2p'] += max(0, p2p or 0)
+                totals['dcdn'] += max(0, dcdn or 0)
+    except sqlite3.Error:
+        return totals
+    return totals
+
+
 def resolve_cloud_host(host):
     try:
         result = subprocess.run(['/usr/bin/dscacheutil', '-q', 'host', '-a', 'name', host],
@@ -267,14 +291,15 @@ def prepare(endpoints, dns=None, cloud_hosts=None, resolver=None):
         if component['id'] in required:
             for server in dns:
                 items.append(make_rule(component, server, '53', 1))
+        if component['id'] == 'com.xunlei.Thunder':
             for endpoint in endpoints:
                 address, address_type = rule_endpoint(endpoint)
                 ports = ('443',) if endpoint.startswith('.') else ('80', '443')
                 for port in ports:
                     items.append(make_rule(component, address, port, 1, address_type))
-            if component['id'] == 'com.xunlei.DownloadService':
-                for address in sorted({ip for values in cloud_addresses.values() for ip in values}):
-                    items.append(make_rule(component, address, '443', 1))
+        if component['id'] == 'com.xunlei.DownloadService':
+            for address in sorted({ip for values in cloud_addresses.values() for ip in values}):
+                items.append(make_rule(component, address, '443', 1))
         rules[component['key']] = items
     OUT.mkdir(parents=True, exist_ok=True)
     timestamp = datetime.datetime.now().strftime('%Y%m%d-%H%M%S')
@@ -321,8 +346,10 @@ def audit():
     except (OSError, ValueError):
         cloud_hosts = DEFAULT_CLOUD_HOSTS
     active_hosts = active_cloud_hosts()
+    active_counters = active_cloud_counters()
     cloud_hosts = list(dict.fromkeys(cloud_hosts + active_hosts))
     cloud_ok = bool(cloud_hosts)
+    strict_cloud_only = False
     cloud_ips = set()
     for host in cloud_hosts:
         try:
@@ -343,6 +370,12 @@ def audit():
                                if r.get('endpointPort') == '443' and r.get('action') == 1
                                and not r.get('isDisabled')}
             cloud_ok = cloud_ok and bool(cloud_ips) and cloud_ips.issubset(allowed_cdn_ips)
+            strict_cloud_only = bool(block) and not prefs.get('passiveMode', False) \
+                and not prefs.get('useAllowList', False) and all(
+                (r.get('endpointAddr'), r.get('endpointPort')) in
+                ({(ip, '443') for ip in cloud_ips} | {(ip, '53') for ip in current_dns})
+                for r in component_rules if r.get('action') == 1 and not r.get('isDisabled'))
+        if c['id'] == 'com.xunlei.Thunder':
             allow_endpoints.update(display_endpoint(r) for r in component_rules
                 if r.get('action') == 1 and not r.get('isDisabled')
                 and r.get('endpointPort') in ('80', '443')
@@ -362,7 +395,9 @@ def audit():
             'dnsExceptionsPresent': dns_ok,
             'cloudHosts': cloud_hosts,
             'activeCloudHosts': active_hosts,
+            'activeCloudCounters': active_counters,
             'cloudExceptionsPresent': cloud_ok,
+            'strictCloudOnly': strict_cloud_only,
             'globalAllowList': bool(prefs.get('useAllowList', False)),
             'localhostBypass': bool(prefs.get('allowLocalHost', False)),
             'passiveMode': bool(prefs.get('passiveMode', False)),

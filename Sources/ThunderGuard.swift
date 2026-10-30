@@ -19,6 +19,7 @@ struct ThunderGuardApp: App {
 
 private struct GuardAudit: Decodable {
     struct Component: Decodable { let id: String; let fallbackBlock: Bool }
+    struct CloudCounters: Decodable { let origin: Int64; let p2p: Int64; let dcdn: Int64 }
     let luluExtensionActive: Bool
     let luluAppRunning: Bool
     let luluProviderRunning: Bool
@@ -31,7 +32,9 @@ private struct GuardAudit: Decodable {
     let dnsExceptionsPresent: Bool
     let cloudHosts: [String]
     let activeCloudHosts: [String]
+    let activeCloudCounters: CloudCounters
     let cloudExceptionsPresent: Bool
+    let strictCloudOnly: Bool
     let globalAllowList: Bool
     let localhostBypass: Bool
     let passiveMode: Bool
@@ -57,7 +60,7 @@ struct GuardView: View {
                 statusPanel
                 GroupBox("1 · 出站连接：LuLu") {
                     VStack(alignment: .leading, spacing: 12) {
-                        Text("默认拦截迅雷与下载服务。仅放行你确认用于正常下载的服务器；其他应用的 LuLu 规则会保留。")
+                        Text("下载服务默认拦截，严格模式的公网出站规则只放行已核实云盘 CDN 的 443 端口及 DNS；迅雷主程序保留云盘控制连接。其他应用的规则会保留。")
                         TextField("下载服务器域名或 IP，每行一个", text: $endpoints, axis: .vertical)
                             .lineLimit(3...6)
                             .textFieldStyle(.roundedBorder)
@@ -130,6 +133,13 @@ struct GuardView: View {
                 status("迅雷主程序与下载服务规则档案", audit?.components.first(where: {$0.id == "com.xunlei.Thunder"})?.fallbackBlock == true && audit?.components.first(where: {$0.id == "com.xunlei.DownloadService"})?.fallbackBlock == true)
                 status("当前 DNS 服务器的 53 端口例外", audit?.dnsExceptionsPresent == true)
                 status("当前云盘 CDN 的精确 IP:443 例外", audit?.cloudExceptionsPresent == true)
+                status("下载服务公网规则仅允许云盘 CDN 与 DNS", audit?.strictCloudOnly == true)
+                if let counters = audit?.activeCloudCounters,
+                   audit?.activeCloudHosts.isEmpty == false {
+                    status("当前取回任务 P2P / DCDN 计数为零", counters.p2p == 0 && counters.dcdn == 0)
+                    Text("迅雷任务计数：源站 \(formatBytes(counters.origin)) · P2P \(formatBytes(counters.p2p)) · DCDN \(formatBytes(counters.dcdn))")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
                 status("系统防火墙", audit?.firewallOn == true)
                 status("迅雷与下载服务入站规则", audit?.inboundMainBlocked == true && audit?.inboundServiceBlocked == true)
                 Text("独立实测：Mini 关闭时云盘副本进度增长；LuLu 同时拒绝了 sandai.net:3076 等非云盘连接。")
@@ -137,6 +147,7 @@ struct GuardView: View {
                 if audit?.luluAppRunning != true { Text("⚠ LuLu 主程序未运行：请启动后再依赖迅雷拦截规则") }
                 if audit?.dnsExceptionsPresent != true { Text("⚠ DNS 例外不完整：云盘取回可能停在 0%；请重新生成并导入规则") }
                 if audit?.cloudExceptionsPresent != true { Text("⚠ 云盘 CDN 的 IP 例外不完整：请重新生成并导入规则") }
+                if audit?.strictCloudOnly != true { Text("⚠ 下载服务仍有云盘 CDN 与 DNS 之外的放行规则：请导入严格模式规则") }
                 if audit?.globalAllowList == true { Text("⚠ LuLu 全局放行列表可能绕过迅雷规则") }
                 if audit?.localhostBypass == true { Text("⚠ LuLu 当前放行本机回环连接") }
                 Text("规则档案和进程状态不能代替流量实测；不能保证识别所有加密 P2P。")
@@ -148,6 +159,10 @@ struct GuardView: View {
     private func status(_ title: String, _ active: Bool) -> some View {
         Text("\(active ? "●" : "○") \(title)：\(active ? "已检测" : "待完成")")
             .foregroundStyle(active ? Color.green : Color.orange)
+    }
+
+    private func formatBytes(_ bytes: Int64) -> String {
+        bytes == 0 ? "0 B" : ByteCountFormatter.string(fromByteCount: bytes, countStyle: .file)
     }
 
     private func run(_ args: [String]) throws -> Data {
