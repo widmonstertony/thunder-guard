@@ -1,6 +1,6 @@
 # Thunder Guard / 迅雷护栏
 
-Free macOS controller for a narrow Thunder policy: allow verified cloud retrieval endpoints, block other outbound Thunder traffic with LuLu, block inbound Thunder traffic with the macOS firewall, and inspect all apps' connections through Netiquette. It does not modify Thunder.
+Free macOS controller for a narrow Thunder policy: allow verified cloud retrieval endpoints, block other outbound Thunder traffic with LuLu, block inbound Thunder traffic with the macOS firewall, and inspect all apps' connections in a native visual dashboard. It does not modify Thunder.
 
 ## One download, two signed components
 
@@ -12,12 +12,14 @@ The package is unsigned and Thunder Guard is ad hoc signed. macOS may require th
 
 1. Install the Release package. On first run, approve LuLu's system extension in macOS if prompted.
 2. In Thunder Guard, generate and back up LuLu rules, then import the generated JSON through LuLu's Rules menu. Configure the inbound firewall with a local administrator password.
-3. Use “查看所有 App 实时连接” to inspect connections and “管理所有 App 出站规则” to set per-app rules.
+3. Open “网络总览” for a live upload/download chart, searchable app list, and current destination addresses, ports, connection states and byte counts. Toggle “仅外网” to include or hide local connections. Use “LuLu 规则” to manage per-app outbound rules; the Thunder rules tab also opens Netiquette's detailed view.
+
+The dashboard reads one-shot CSV samples from macOS's built-in `nettop` every three seconds. Rates are differences in process byte counters, and the chart retains about three minutes of history while the window is open. It does not record traffic content or upload snapshots. Blocked attempts are generally absent from `nettop`; use LuLu logs to verify blocks.
 
 The current policy only controls Thunder and its helpers. It does not automatically classify or block P2P for every app. Allowed HTTPS may carry traffic that cannot be classified from an IP address and port. CDN IPs can change; regenerate and import rules after such changes.
 
 ## Build
 
-Requires macOS 14+, Xcode command-line tools, and Python 3. Build the controller with `./build.sh`. Run `python3 -m unittest discover -s Tests -v` for rule-builder tests. To create a local Release package, place an original signed LuLu v4.5.3 app in `/Applications/LuLu.app` or `Build/LuLu-4.5.3-backup.app` and run `./package-release.sh`.
+Requires macOS 14+, Xcode command-line tools, and Python 3. Build the controller with `./build.sh`. Run `python3 -m unittest discover -s Tests -v` for rule-builder and network-sampler tests. To create a local Release package, place an original signed LuLu v4.5.3 app in `/Applications/LuLu.app` or `Build/LuLu-4.5.3-backup.app` and run `./package-release.sh`.
 
 Thunder Guard's code is GPL-3.0. See [LICENSE.md](LICENSE.md) and [UPSTREAM.md](UPSTREAM.md).

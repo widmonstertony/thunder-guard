@@ -4,8 +4,14 @@ import AppKit
 @main
 struct ThunderGuardApp: App {
     var body: some Scene {
-        WindowGroup("迅雷护栏") { GuardView() }
-            .windowResizability(.contentSize)
+        WindowGroup("迅雷护栏") {
+            TabView {
+                NetworkDashboardView()
+                    .tabItem { Label("网络总览", systemImage: "chart.xyaxis.line") }
+                GuardView()
+                    .tabItem { Label("迅雷规则", systemImage: "shield.lefthalf.filled") }
+            }
+        }
     }
 }
 
@@ -92,9 +98,9 @@ struct GuardView: View {
                 }
                 GroupBox("4 · 查看其他 App") {
                     VStack(alignment: .leading, spacing: 10) {
-                        Text("LuLu 自带的 Netiquette 会显示所有 App 的当前连接、目标地址、端口及收发量。需要拦截某个 App 时，可在 LuLu 为它设置出站规则。")
+                        Text("“网络总览”页直接显示所有 App 的当前连接、目标地址、端口及收发量。需要拦截某个 App 时，可在 LuLu 为它设置出站规则。")
                         HStack {
-                            Button("查看所有 App 实时连接") { openNetworkMonitor() }
+                            Button("打开 Netiquette 详细视图") { openNetworkMonitor() }
                             Button("管理所有 App 出站规则") { openLuLuRules() }
                         }
                         Text("连接信息本身不能可靠判断所有 P2P；按进程和目标逐项核查后再拦截。")
