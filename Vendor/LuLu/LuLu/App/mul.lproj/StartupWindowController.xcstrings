@@ -1,0 +1,186 @@
+{
+  "sourceLanguage" : "en",
+  "strings" : {
+    "tj8-5e-Vlc.title" : {
+      "comment" : "Class = \"NSTextFieldCell\"; title = \"Now starting up...\"; ObjectID = \"tj8-5e-Vlc\";",
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Startet jetzt..."
+          }
+        },
+        "el" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Εκκίνηση τώρα…"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Now starting up..."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Iniciando ahora..."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Démarrage en cours …"
+          }
+        },
+        "it" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Avvio in corso..."
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "시동 중..."
+          }
+        },
+        "pl" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Uruchamianie…"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Inicializando…"
+          }
+        },
+        "tr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "şimdi başlatılıyor…"
+          }
+        },
+        "uk" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Запуск…"
+          }
+        },
+        "ur" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "اب شروع ہو رہا ہے..."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在启动..."
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在啟動..."
+          }
+        }
+      }
+    },
+    "XsZ-6a-7Rk.title" : {
+      "comment" : "Class = \"NSTextFieldCell\"; title = \"Note: LuLu works best on macOS 15.3+, as Apple fixed bugs affecting network stability. \"; ObjectID = \"XsZ-6a-7Rk\";",
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Hinweis: LuLu funktioniert am besten unter macOS 15.3+, da Apple Fehler behoben hat, die die Netzwerkstabilität beeinträchtigten."
+          }
+        },
+        "el" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Σημείωση: Το LuLu λειτουργεί καλύτερα σε macOS 15.3+, καθώς η Apple διόρθωσε σφάλματα που επηρέαζαν τη σταθερότητα του δικτύου. "
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Note: LuLu works best on macOS 15.3+, as Apple fixed bugs affecting network stability. "
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Nota: LuLu funciona mejor en macOS 15.3+, ya que Apple corrigió errores que afectaban la estabilidad de la red."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Remarque : LuLu fonctionne mieux sur macOS 15.3+, car Apple a corrigé des bugs affectant la stabilité du réseau."
+          }
+        },
+        "it" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Nota: LuLu funziona al meglio su macOS 15.3+, poiché Apple ha corretto bug che influivano sulla stabilità della rete."
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "참고: LuLu는 macOS 버전 15.3 이상에 최적화되었습니다. 이는 Apple이 네트워크 안정성에 영향을 주는 버그를 수정했기 때문입니다."
+          }
+        },
+        "pl" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Uwaga: LuLu działa najlepiej na macOS 15.3+, ponieważ Apple naprawiło błędy wpływające na stabilność sieci."
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Nota: O LuLu funciona melhor no macOS 15.3+, pois a Apple corrigiu bugs que afetavam a estabilidade da rede."
+          }
+        },
+        "tr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Not: LuLu, macOS 15.3+ üzerinde en iyi şekilde çalışır, çünkü Apple ağ kararlılığını etkileyen hataları düzeltti."
+          }
+        },
+        "uk" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Примітка: LuLu найкраще працює на macOS 15.3+, оскільки Apple виправила помилки, що впливали на стабільність мережі."
+          }
+        },
+        "ur" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "نوٹ: لولو macOS 15.3+ پر بہترین کام کرتا ہے، کیونکہ ایپل نے نیٹ ورک کی استحکام کو متاثر کرنے والے بگز کو ٹھیک کیا ہے۔"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "注意：LuLu 在 macOS 15.3+ 上运行效果最佳，因为 Apple 修复了影响网络稳定性的错误。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "注意：由於 Apple 修復了影響網路穩定性的錯誤，LuLu 在 macOS 15.3+ 上運作最佳。"
+          }
+        }
+      }
+    }
+  },
+  "version" : "1.0"
+}

@@ -1,0 +1,125 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<document type="com.apple.InterfaceBuilder3.Cocoa.XIB" version="3.0" toolsVersion="24128" targetRuntime="MacOSX.Cocoa" propertyAccessControl="none" useAutolayout="YES" customObjectInstantitationMethod="direct">
+    <dependencies>
+        <deployment identifier="macosx"/>
+        <plugIn identifier="com.apple.InterfaceBuilder.CocoaPlugin" version="24128"/>
+    </dependencies>
+    <objects>
+        <customObject id="-2" userLabel="File's Owner" customClass="NSApplication">
+            <connections>
+                <outlet property="delegate" destination="Voe-Tx-rLC" id="GzC-gU-4Uq"/>
+            </connections>
+        </customObject>
+        <customObject id="-1" userLabel="First Responder" customClass="FirstResponder"/>
+        <customObject id="-3" userLabel="Application" customClass="NSObject"/>
+        <customObject id="Voe-Tx-rLC" customClass="AppDelegate">
+            <connections>
+                <outlet property="profileSwitchMenuItem" destination="ahR-T8-occ" id="SWm-ux-zVF"/>
+                <outlet property="profilesMenu" destination="1HU-j3-Oa3" id="Mlf-Md-K1Q"/>
+                <outlet property="profilesMenuItem" destination="7kG-TA-f15" id="seZ-kC-yqm"/>
+                <outlet property="statusMenu" destination="bI7-kC-IUx" id="czq-O5-Zp6"/>
+            </connections>
+        </customObject>
+        <customObject id="YLy-65-1bz" customClass="NSFontManager"/>
+        <menu title="Main Menu" systemMenu="main" autoenablesItems="NO" id="uhX-d8-iZM">
+            <items>
+                <menuItem title="LuLu" id="aJV-EX-6bj" userLabel="LuLu">
+                    <modifierMask key="keyEquivalentModifierMask"/>
+                    <menu key="submenu" title="LuLu" systemMenu="apple" id="J1I-fS-R65">
+                        <items>
+                            <menuItem title="About LuLu" id="q1D-fP-yr1" userLabel="About LuLu">
+                                <modifierMask key="keyEquivalentModifierMask"/>
+                                <connections>
+                                    <action selector="showAbout:" target="Voe-Tx-rLC" id="SNF-kS-dLh"/>
+                                </connections>
+                            </menuItem>
+                            <menuItem isSeparatorItem="YES" id="AmB-Y6-frK"/>
+                            <menuItem title="Quit LuLu" keyEquivalent="q" id="DEa-wY-se7">
+                                <connections>
+                                    <action selector="quit:" target="Voe-Tx-rLC" id="dd7-Bg-qcz"/>
+                                </connections>
+                            </menuItem>
+                        </items>
+                    </menu>
+                </menuItem>
+            </items>
+            <point key="canvasLocation" x="-59" y="-473"/>
+        </menu>
+        <menu id="bI7-kC-IUx" userLabel="Status Bar Menu">
+            <items>
+                <menuItem title="LULU: enabled" tag="100" enabled="NO" id="w99-Wo-epe">
+                    <modifierMask key="keyEquivalentModifierMask"/>
+                </menuItem>
+                <menuItem title="Profile: Default" tag="101" enabled="NO" id="mxA-q2-fvN">
+                    <modifierMask key="keyEquivalentModifierMask"/>
+                </menuItem>
+                <menuItem isSeparatorItem="YES" id="RP3-f7-E06"/>
+                <menuItem title="Disable" tag="102" id="l9M-p8-kao">
+                    <modifierMask key="keyEquivalentModifierMask"/>
+                </menuItem>
+                <menuItem isSeparatorItem="YES" id="bOQ-2w-DOF"/>
+                <menuItem title="Rules" id="UuL-hi-gEf">
+                    <modifierMask key="keyEquivalentModifierMask"/>
+                    <menu key="submenu" title="Rules" id="vb5-99-ejR">
+                        <items>
+                            <menuItem title="Show..." tag="103" id="0Y1-Pq-6Fc">
+                                <modifierMask key="keyEquivalentModifierMask"/>
+                            </menuItem>
+                            <menuItem isSeparatorItem="YES" id="MiV-95-jrU"/>
+                            <menuItem title="Add..." tag="104" id="gXq-yc-QnA">
+                                <modifierMask key="keyEquivalentModifierMask"/>
+                            </menuItem>
+                            <menuItem title="Export..." tag="105" id="aZa-10-Ir1">
+                                <modifierMask key="keyEquivalentModifierMask"/>
+                            </menuItem>
+                            <menuItem title="Import..." tag="106" id="39l-3u-dUR">
+                                <modifierMask key="keyEquivalentModifierMask"/>
+                            </menuItem>
+                            <menuItem isSeparatorItem="YES" id="wFv-yB-0aF"/>
+                            <menuItem title="Cleanup" tag="107" id="Lse-DT-C0z">
+                                <modifierMask key="keyEquivalentModifierMask"/>
+                            </menuItem>
+                        </items>
+                    </menu>
+                </menuItem>
+                <menuItem title="Profiles" id="7kG-TA-f15">
+                    <modifierMask key="keyEquivalentModifierMask"/>
+                    <menu key="submenu" title="Profiles" id="d49-Ze-8oD">
+                        <items>
+                            <menuItem title="Switch" id="ahR-T8-occ">
+                                <modifierMask key="keyEquivalentModifierMask"/>
+                                <menu key="submenu" title="Switch" id="1HU-j3-Oa3">
+                                    <items>
+                                        <menuItem id="TRi-aL-EeM">
+                                            <modifierMask key="keyEquivalentModifierMask"/>
+                                        </menuItem>
+                                    </items>
+                                </menu>
+                            </menuItem>
+                            <menuItem isSeparatorItem="YES" id="nxi-S8-RZE"/>
+                            <menuItem title="Manage..." tag="108" id="pF8-Hh-0tW">
+                                <modifierMask key="keyEquivalentModifierMask"/>
+                            </menuItem>
+                        </items>
+                    </menu>
+                </menuItem>
+                <menuItem title="Settings..." tag="109" keyEquivalent="," id="4Uv-rm-VzQ"/>
+                <menuItem title="Network Monitor..." tag="110" id="VuY-Sy-392" userLabel="Network Monitor...">
+                    <modifierMask key="keyEquivalentModifierMask"/>
+                </menuItem>
+                <menuItem isSeparatorItem="YES" id="i6W-GD-eRH"/>
+                <menuItem title="Quit LuLu" tag="111" id="QrZ-U2-1Ib">
+                    <modifierMask key="keyEquivalentModifierMask"/>
+                </menuItem>
+                <menuItem title="Uninstall LuLu" tag="112" id="lns-C6-Aa5">
+                    <modifierMask key="keyEquivalentModifierMask"/>
+                </menuItem>
+                <menuItem isSeparatorItem="YES" id="4wj-Sr-XSL"/>
+                <menuItem title="Support LuLu 💕" tag="113" id="K0B-xd-gGB">
+                    <modifierMask key="keyEquivalentModifierMask"/>
+                </menuItem>
+            </items>
+            <point key="canvasLocation" x="55" y="10"/>
+        </menu>
+    </objects>
+</document>

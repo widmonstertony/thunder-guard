@@ -1,0 +1,10 @@
+Build/
+Research/
+Verification.txt
+README.txt
+**/__pycache__/
+*.pyc
+.DS_Store
+*.dmg
+*.pkg
+*.zip
