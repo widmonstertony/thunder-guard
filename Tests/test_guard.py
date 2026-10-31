@@ -2,6 +2,7 @@ import importlib.util
 import json
 import pathlib
 import plistlib
+import re
 import sqlite3
 import tempfile
 import unittest
@@ -70,15 +71,24 @@ class GuardTests(unittest.TestCase):
             expected = [(address, '53', 1) for address in dns]
             if component['id'] == 'com.xunlei.Thunder':
                 expected += [('speed.cloudflare.com', '80', 1), ('speed.cloudflare.com', '443', 1),
-                             (r'(^|\.)xunlei\.com$', '443', 1)]
+                             (r'(?:[a-zA-Z0-9-]+[.])*xunlei\.com$', '443', 1)] + [(host, port, 1) for host, ports in guard.UI_SERVICE_PORTS.items() for port in ports]
             self.assertEqual([(r['endpointAddr'], r['endpointPort'], r['action']) for r in rules[1:]], expected)
             self.assertEqual([r['isEndpointAddrRegex'] for r in rules[1:]],
-                             [0] * len(dns) + ([0, 0, 1] if component['id'] == 'com.xunlei.Thunder' else []))
+                             [0] * len(dns) + ([0, 0, 1, 0, 0, 0] if component['id'] == 'com.xunlei.Thunder' else []))
         for rules in generated.values():
             for rule in rules:
                 for key in ('key', 'uuid', 'path', 'name', 'endpointAddr', 'endpointPort', 'type', 'scope', 'action'):
                     self.assertIn(key, rule)
         self.assertEqual(self.rule_file.read_bytes(), pathlib.Path(result['backup']).read_bytes())
+
+    def test_domain_regex_matches_lulu_full_string_semantics(self):
+        pattern, kind = guard.rule_endpoint('.xunlei.com')
+        self.assertEqual(kind, 1)
+        for host in ('xunlei.com', 'api-pan.xunlei.com', 'images.client.vip.xunlei.com'):
+            self.assertIsNotNone(re.fullmatch(pattern, host))
+        for host in ('evilxunlei.com', 'xunlei.com.evil.test', 'https://evil.test/xunlei.com'):
+            self.assertIsNone(re.fullmatch(pattern, host))
+        self.assertEqual(guard.display_endpoint({'endpointAddr': pattern, 'isEndpointAddrRegex': 1}), '.xunlei.com')
 
     def test_rejects_wildcard_and_path_injection(self):
         self.assertEqual(guard.valid_endpoint('2606:4700:7::da'), '2606:4700:7::da')
@@ -105,7 +115,7 @@ class GuardTests(unittest.TestCase):
         self.assertNotIn(('*', '1500'), allowed)
         self.assertNotIn(('111.63.172.45', '80'), allowed)
         self.assertNotIn(('speed.cloudflare.com', '443'), allowed)
-        self.assertNotIn((r'(^|\.)xunlei\.com$', '443'), allowed)
+        self.assertNotIn((r'(?:[a-zA-Z0-9-]+[.])*xunlei\.com$', '443'), allowed)
 
     def test_active_cloud_hosts_ignores_peer_urls_and_private_link_parameters(self):
         db_path = self.root / 'tasks.db'

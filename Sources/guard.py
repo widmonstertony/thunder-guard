@@ -20,6 +20,9 @@ OUT = pathlib.Path.home() / 'Documents' / 'ThunderGuard'
 STATE = pathlib.Path.home() / 'Library' / 'Application Support' / 'ThunderGuard'
 TEAM = 'SXKSDVK696'
 DEFAULT_CLOUD_HOSTS = ['vod3429-aliyun04-vip-lixian.xunlei.com']
+UI_SERVICE_PORTS = {'static-xl9-ssl.xunlei.com': ('80',),
+                    'images.client.vip.xunlei.com': ('80',),
+                    'xfile2.a.88cdn.com': ('443',)}
 RULES = ROOT / 'rules.plist'
 TASK_DB = pathlib.Path.home() / 'Library/Application Support/Thunder/etm3/etm_map.db'
 COMPONENTS = [
@@ -162,18 +165,19 @@ def valid_endpoint(value):
 
 def rule_endpoint(value):
     if value.startswith('.'):
-        return r'(^|\.)' + re.escape(value[1:]) + '$', 1
+        # LuLu wraps regexes in ^(?:...)$: include the complete subdomain prefix.
+        return r'(?:[a-zA-Z0-9-]+[.])*' + re.escape(value[1:]) + '$', 1
     return value, 0
 
 
 def display_endpoint(rule):
     value = rule.get('endpointAddr', '')
     if rule.get('isEndpointAddrRegex') == 1:
-        prefix = r'(^|\.)'
-        if value.startswith(prefix) and value.endswith('$'):
-            base = value[len(prefix):-1].replace(r'\.', '.')
-            if re.escape(base) == value[len(prefix):-1]:
-                return valid_endpoint('.' + base)
+        for prefix in (r'(^|\.)', r'(?:[a-zA-Z0-9-]+[.])*'):
+            if value.startswith(prefix) and value.endswith('$'):
+                base = value[len(prefix):-1].replace(r'\.', '.')
+                if re.escape(base) == value[len(prefix):-1]:
+                    return valid_endpoint('.' + base)
         return None
     return value if value not in ('', '*') else None
 
@@ -261,6 +265,7 @@ def resolve_cloud_host(host):
 
 
 def prepare(endpoints, dns=None, cloud_hosts=None, resolver=None):
+    endpoints = list(dict.fromkeys(endpoints + list(UI_SERVICE_PORTS)))
     if not RULES.is_file():
         raise FileNotFoundError('LuLu rules not initialized')
     components = signed_components()
@@ -294,7 +299,7 @@ def prepare(endpoints, dns=None, cloud_hosts=None, resolver=None):
         if component['id'] == 'com.xunlei.Thunder':
             for endpoint in endpoints:
                 address, address_type = rule_endpoint(endpoint)
-                ports = ('443',) if endpoint.startswith('.') else ('80', '443')
+                ports = UI_SERVICE_PORTS.get(endpoint, ('443',) if endpoint.startswith('.') else ('80', '443'))
                 for port in ports:
                     items.append(make_rule(component, address, port, 1, address_type))
         if component['id'] == 'com.xunlei.DownloadService':

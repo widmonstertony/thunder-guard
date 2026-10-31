@@ -2,7 +2,7 @@
 set -euo pipefail
 cd "${0:A:h}"
 
-version=0.3.2
+version=0.3.3
 upstream='Build/LuLu-4.5.3-backup.app'
 if [[ ! -d "$upstream" ]]; then
     upstream='/Applications/LuLu.app'
