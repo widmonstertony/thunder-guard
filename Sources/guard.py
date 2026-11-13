@@ -20,6 +20,13 @@ OUT = pathlib.Path.home() / 'Documents' / 'ThunderGuard'
 STATE = pathlib.Path.home() / 'Library' / 'Application Support' / 'ThunderGuard'
 TEAM = 'SXKSDVK696'
 DEFAULT_CLOUD_HOSTS = ['vod3429-aliyun04-vip-lixian.xunlei.com']
+CLOUD_CDN_PATTERN = r'vod[0-9]+-[a-zA-Z0-9-]+-vip-lixian[.]xunlei[.]com'
+# Selective destination rules, not a protocol classifier. These targets were
+# observed in local peer-discovery attempts; cloud CDN hosts are not included.
+PEER_PATTERNS = [r'(?:[a-zA-Z0-9-]+[.])*(?:phub|shub)[.]sandai[.]net',
+                 r'(?:[a-zA-Z0-9-]+[.])*bt[.]n0808[.]com']
+PEER_PORTS = ['1500', '3076', '11400', '25401'] + [str(x) for x in range(6881, 6890)]
+NAMED_HOST_PATTERN = r'(?:[a-zA-Z0-9-]+[.])+[a-zA-Z][a-zA-Z0-9-]*[.]?'
 UI_SERVICE_PORTS = {'static-xl9-ssl.xunlei.com': ('80',),
                     'images.client.vip.xunlei.com': ('80',),
                     'xfile2.a.88cdn.com': ('443',)}
@@ -264,7 +271,9 @@ def resolve_cloud_host(host):
     return sorted(addresses)
 
 
-def prepare(endpoints, dns=None, cloud_hosts=None, resolver=None):
+def prepare(endpoints, dns=None, cloud_hosts=None, resolver=None, policy='peer-block'):
+    if policy not in ('peer-block', 'cloud-only'):
+        raise ValueError('Unknown policy')
     endpoints = list(dict.fromkeys(endpoints + list(UI_SERVICE_PORTS)))
     if not RULES.is_file():
         raise FileNotFoundError('LuLu rules not initialized')
@@ -273,13 +282,13 @@ def prepare(endpoints, dns=None, cloud_hosts=None, resolver=None):
     if not required.issubset({c['id'] for c in components}):
         raise RuntimeError('Main Thunder or DownloadService signature was not verified')
     dns = dns_servers() if dns is None else dns
-    if not dns:
+    if not dns and policy == 'cloud-only':
         raise RuntimeError('No system DNS servers found; cannot create working download rules')
     dns = list(dict.fromkeys(str(ipaddress.ip_address(value)) for value in dns))
     cloud_hosts = list(dict.fromkeys(valid_cloud_host(x) for x in (cloud_hosts or [])))
     resolver = resolver or resolve_cloud_host
     cloud_addresses = {}
-    for host in cloud_hosts:
+    for host in cloud_hosts if policy == 'cloud-only' else []:
         cloud_addresses[host] = sorted({str(ipaddress.ip_address(ip)) for ip in resolver(host)})
         if not cloud_addresses[host]:
             raise RuntimeError(f'No addresses found for {host}')
@@ -291,6 +300,17 @@ def prepare(endpoints, dns=None, cloud_hosts=None, resolver=None):
     for key in keys:
         rules.pop(key, None)
     for component in components:
+        if policy == 'peer-block':
+            # Mirror Mini's observed named-host / direct-IP distinction. A
+            # hostname may come from flow.URL or flow.remoteHostname in LuLu.
+            # Numeric-IP-only flows never match this expression.
+            items = [make_rule(component, '*', '*', 0),
+                     make_rule(component, NAMED_HOST_PATTERN, '*', 1, 1)]
+            items += [make_rule(component, server, '53', 1) for server in dns]
+            items += [make_rule(component, address, '*', 0, 1) for address in PEER_PATTERNS]
+            items += [make_rule(component, '*', port, 0) for port in PEER_PORTS]
+            rules[component['key']] = items
+            continue
         # LuLu prioritizes address:port matches over the fallback *:* block.
         items = [make_rule(component, '*', '*', 0)]
         if component['id'] in required:
@@ -303,6 +323,9 @@ def prepare(endpoints, dns=None, cloud_hosts=None, resolver=None):
                 for port in ports:
                     items.append(make_rule(component, address, port, 1, address_type))
         if component['id'] == 'com.xunlei.DownloadService':
+            # Match the actual cloud hostname on every new flow, rather than a
+            # DNS snapshot that stops working when the CDN rotates addresses.
+            items.append(make_rule(component, CLOUD_CDN_PATTERN, '443', 1, 1))
             for address in sorted({ip for values in cloud_addresses.values() for ip in values}):
                 items.append(make_rule(component, address, '443', 1))
         rules[component['key']] = items
@@ -313,8 +336,9 @@ def prepare(endpoints, dns=None, cloud_hosts=None, resolver=None):
     backup.write_bytes(raw)
     output.write_text(json.dumps(rules, ensure_ascii=False, indent=2) + '\n')
     manifest = {'output': str(output), 'backup': str(backup),
+                'policy': policy, 'peerPatterns': PEER_PATTERNS, 'peerPorts': PEER_PORTS,
                 'componentIDs': [c['id'] for c in components],
-                'allowEndpoints': endpoints, 'dnsServers': dns,
+                'allowEndpoints': endpoints if policy == 'cloud-only' else [], 'dnsServers': dns,
                 'cloudHosts': cloud_hosts, 'cloudAddresses': cloud_addresses,
                 'otherRuleGroupsPreserved': len(rules)-len(components)}
     manifest_text = json.dumps(manifest, ensure_ascii=False, indent=2)
@@ -356,7 +380,13 @@ def audit():
     cloud_ok = bool(cloud_hosts)
     strict_cloud_only = False
     cloud_ips = set()
-    for host in cloud_hosts:
+    # A hostname-based profile does not depend on resolving old task hosts.
+    # Avoid serial DNS lookups on each periodic dashboard refresh in that mode.
+    hostname_policy = any(r.get('endpointAddr') == NAMED_HOST_PATTERN
+        and r.get('action') == 1 and r.get('isEndpointAddrRegex') == 1
+        and not r.get('isDisabled') for c in components
+        if c['id'] == 'com.xunlei.DownloadService' for r in live.get(c['key'], []))
+    for host in cloud_hosts if not hostname_policy else []:
         try:
             cloud_ips.update(resolve_cloud_host(valid_cloud_host(host)))
         except (OSError, ValueError, RuntimeError):
@@ -364,20 +394,35 @@ def audit():
     for c in components:
         component_rules = live.get(c['key'], [])
         block = [r for r in component_rules if r.get('endpointAddr') == '*' and r.get('endpointPort') == '*' and r.get('action') == 0 and not r.get('isDisabled')]
-        reports.append({'id': c['id'], 'fallbackBlock': bool(block)})
+        enabled_rules = [r for r in component_rules if not r.get('isDisabled')]
+        fallback_allow = any(r.get('endpointAddr') == '*' and r.get('endpointPort') == '*'
+                             and r.get('action') == 1 for r in enabled_rules)
+        named_allow = any(r.get('endpointAddr') == NAMED_HOST_PATTERN and r.get('endpointPort') == '*'
+                          and r.get('isEndpointAddrRegex') == 1 and r.get('action') == 1 for r in enabled_rules)
+        peer_blocks = all(any(r.get('endpointAddr') == address and r.get('endpointPort') == '*'
+                             and r.get('isEndpointAddrRegex') == 1 and r.get('action') == 0
+                             for r in enabled_rules) for address in PEER_PATTERNS) and all(
+                          any(r.get('endpointAddr') == '*' and r.get('endpointPort') == port
+                              and r.get('action') == 0 for r in enabled_rules) for port in PEER_PORTS)
+        reports.append({'id': c['id'], 'fallbackBlock': bool(block),
+                        'fallbackAllow': fallback_allow, 'namedAllow': named_allow, 'peerBlocks': peer_blocks})
         if c['id'] in {'com.xunlei.Thunder', 'com.xunlei.DownloadService'}:
             allowed_dns = {r.get('endpointAddr') for r in component_rules
                            if r.get('endpointPort') == '53' and r.get('action') == 1
                            and not r.get('isDisabled')}
             dns_ok = dns_ok and set(current_dns).issubset(allowed_dns)
         if c['id'] == 'com.xunlei.DownloadService':
+            hostname_rule = any(r.get('endpointAddr') == CLOUD_CDN_PATTERN
+                and r.get('isEndpointAddrRegex') == 1 and r.get('endpointPort') == '443'
+                and r.get('action') == 1 and not r.get('isDisabled') for r in component_rules)
             allowed_cdn_ips = {r.get('endpointAddr') for r in component_rules
                                if r.get('endpointPort') == '443' and r.get('action') == 1
                                and not r.get('isDisabled')}
-            cloud_ok = cloud_ok and bool(cloud_ips) and cloud_ips.issubset(allowed_cdn_ips)
-            strict_cloud_only = bool(block) and not prefs.get('passiveMode', False) \
+            cloud_ok = hostname_rule or (cloud_ok and bool(cloud_ips) and cloud_ips.issubset(allowed_cdn_ips))
+            strict_cloud_only = bool(block) and not prefs.get('disabled', True) and not prefs.get('passiveMode', False) \
                 and not prefs.get('useAllowList', False) and all(
-                (r.get('endpointAddr'), r.get('endpointPort')) in
+                (r.get('endpointAddr') == CLOUD_CDN_PATTERN and r.get('isEndpointAddrRegex') == 1
+                 and r.get('endpointPort') == '443') or (r.get('endpointAddr'), r.get('endpointPort')) in
                 ({(ip, '443') for ip in cloud_ips} | {(ip, '53') for ip in current_dns})
                 for r in component_rules if r.get('action') == 1 and not r.get('isDisabled'))
         if c['id'] == 'com.xunlei.Thunder':
@@ -389,6 +434,10 @@ def audit():
     lulu_active = any('com.objective-see.lulu.extension' in line and
                       'activated enabled' in line for line in extensions.splitlines())
     return {'luluExtensionActive': lulu_active,
+            'filterEnabled': not bool(prefs.get('disabled', True)),
+            'selectivePeerBlock': bool(reports) and all(r['namedAllow'] and r['peerBlocks']
+                                                       and r['fallbackBlock'] and not r['fallbackAllow'] for r in reports),
+            'peerPatterns': PEER_PATTERNS, 'peerPorts': PEER_PORTS,
             'luluAppRunning': lulu_app,
             'luluProviderRunning': lulu_provider,
             'firewallOn': 'State = 1' in fw,
@@ -414,13 +463,14 @@ def main():
     parser.add_argument('command', choices=['audit', 'prepare'])
     parser.add_argument('--allow', action='append', default=[])
     parser.add_argument('--cloud-host', action='append', default=[])
+    parser.add_argument('--policy', choices=['peer-block', 'cloud-only'], default='peer-block')
     args = parser.parse_args()
     try:
         if args.command == 'audit':
             print(json.dumps(audit(), ensure_ascii=False, indent=2))
         else:
             endpoints = list(dict.fromkeys(valid_endpoint(x) for x in args.allow))
-            print(json.dumps(prepare(endpoints, cloud_hosts=args.cloud_host), ensure_ascii=False, indent=2))
+            print(json.dumps(prepare(endpoints, cloud_hosts=args.cloud_host, policy=args.policy), ensure_ascii=False, indent=2))
     except Exception as exc:
         print(f'{type(exc).__name__}: {exc}', file=sys.stderr)
         return 1

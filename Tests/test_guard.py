@@ -4,6 +4,7 @@ import pathlib
 import plistlib
 import re
 import sqlite3
+import subprocess
 import tempfile
 import unittest
 from unittest import mock
@@ -62,7 +63,7 @@ class GuardTests(unittest.TestCase):
     def test_archive_round_trip_keeps_other_apps_and_required_fields(self):
         baseline = guard.as_export(guard.Archive(self.rule_file.read_bytes()))
         dns = ['100.100.100.100', 'fd7a:115c:a1e0::53']
-        result = guard.prepare(['speed.cloudflare.com', '.xunlei.com'], dns=dns)
+        result = guard.prepare(['speed.cloudflare.com', '.xunlei.com'], dns=dns, policy='cloud-only')
         generated = json.loads(pathlib.Path(result['output']).read_text())
         self.assertEqual(baseline['unrelated:key'], generated['unrelated:key'])
         for component in self.components:
@@ -72,9 +73,11 @@ class GuardTests(unittest.TestCase):
             if component['id'] == 'com.xunlei.Thunder':
                 expected += [('speed.cloudflare.com', '80', 1), ('speed.cloudflare.com', '443', 1),
                              (r'(?:[a-zA-Z0-9-]+[.])*xunlei\.com$', '443', 1)] + [(host, port, 1) for host, ports in guard.UI_SERVICE_PORTS.items() for port in ports]
+            else:
+                expected += [(guard.CLOUD_CDN_PATTERN, '443', 1)]
             self.assertEqual([(r['endpointAddr'], r['endpointPort'], r['action']) for r in rules[1:]], expected)
             self.assertEqual([r['isEndpointAddrRegex'] for r in rules[1:]],
-                             [0] * len(dns) + ([0, 0, 1, 0, 0, 0] if component['id'] == 'com.xunlei.Thunder' else []))
+                             [0] * len(dns) + ([0, 0, 1, 0, 0, 0] if component['id'] == 'com.xunlei.Thunder' else [1]))
         for rules in generated.values():
             for rule in rules:
                 for key in ('key', 'uuid', 'path', 'name', 'endpointAddr', 'endpointPort', 'type', 'scope', 'action'):
@@ -105,7 +108,7 @@ class GuardTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 guard.valid_cloud_host(other)
         result = guard.prepare([], dns=['100.100.100.100'], cloud_hosts=[host],
-                               resolver=lambda _: ['111.63.172.45', '240e:940:a03:a00::1'])
+                               resolver=lambda _: ['111.63.172.45', '240e:940:a03:a00::1'], policy='cloud-only')
         generated = json.loads(pathlib.Path(result['output']).read_text())
         service = self.components[1]
         allowed = {(r['endpointAddr'], r['endpointPort']) for r in generated[service['key']]
@@ -116,6 +119,58 @@ class GuardTests(unittest.TestCase):
         self.assertNotIn(('111.63.172.45', '80'), allowed)
         self.assertNotIn(('speed.cloudflare.com', '443'), allowed)
         self.assertNotIn((r'(?:[a-zA-Z0-9-]+[.])*xunlei\.com$', '443'), allowed)
+
+    def test_rotating_cloud_hostnames_work_without_a_new_ip_snapshot(self):
+        result = guard.prepare([], dns=['100.100.100.100'], policy='cloud-only')
+        generated = json.loads(pathlib.Path(result['output']).read_text())
+        rules = generated[self.components[1]['key']]
+        rule = next(r for r in rules if r['endpointAddr'] == guard.CLOUD_CDN_PATTERN)
+        self.assertEqual((rule['action'], rule['endpointPort'], rule['isEndpointAddrRegex']), (1, '443', 1))
+        for host in ('vod0572-b02-vip-lixian.xunlei.com', 'vod9999-new-cdn-vip-lixian.xunlei.com'):
+            self.assertIsNotNone(re.fullmatch(rule['endpointAddr'], host))
+        for peer in ('peer.xunlei.com', 'hub5u.v6.phub.sandai.net',
+                     'vod0572-b02-vip-lixian.xunlei.com.evil.test', '1.2.3.4'):
+            self.assertIsNone(re.fullmatch(rule['endpointAddr'], peer))
+
+    def test_default_policy_preserves_normal_connections_and_only_lists_peer_blocks(self):
+        result = guard.prepare([], dns=[])
+        generated = json.loads(pathlib.Path(result['output']).read_text())
+        self.assertEqual(result['policy'], 'peer-block')
+        self.assertEqual(generated['unrelated:key'],
+                         guard.as_export(guard.Archive(self.rule_file.read_bytes()))['unrelated:key'])
+        for component in self.components:
+            rules = generated[component['key']]
+            self.assertEqual((rules[0]['endpointAddr'], rules[0]['endpointPort'], rules[0]['action']), ('*', '*', 0))
+            self.assertEqual((rules[1]['endpointAddr'], rules[1]['action']), (guard.NAMED_HOST_PATTERN, 1))
+            denied = rules[2:]
+            self.assertTrue(all(r['action'] == 0 for r in denied))
+            self.assertEqual({r['endpointPort'] for r in denied}, set(guard.PEER_PORTS) | {'*'})
+            for host in ('vod9999-new-vip-lixian.xunlei.com', 'xfile2.a.88cdn.com',
+                         'api-pan.xunlei.com', 'new-cdn.example.com'):
+                self.assertIsNotNone(re.fullmatch(guard.NAMED_HOST_PATTERN, host))
+                self.assertFalse(any(re.fullmatch(r['endpointAddr'], host)
+                                     for r in denied if r['isEndpointAddrRegex']))
+            for peer in ('hub5u.v6.phub.sandai.net', 'hub5idx.v6.shub.sandai.net', 'pool.v6.bt.n0808.com'):
+                self.assertTrue(any(re.fullmatch(r['endpointAddr'], peer)
+                                    for r in denied if r['isEndpointAddrRegex']))
+            for numeric in ('1.2.3.4', '240e:940:a03:300::1', 'https://example.com/a'):
+                self.assertIsNone(re.fullmatch(guard.NAMED_HOST_PATTERN, numeric))
+
+    def test_running_extension_does_not_hide_disabled_filter(self):
+        (self.root / 'preferences.plist').write_bytes(plistlib.dumps({'disabled': True}))
+        running = subprocess.CompletedProcess([], 0,
+            'com.objective-see.lulu.extension activated enabled\nState = 1\nblocked', '')
+        with mock.patch.object(guard, 'ROOT', self.root), \
+             mock.patch.object(guard, 'run', return_value=running), \
+             mock.patch.object(guard, 'dns_servers', return_value=[]), \
+             mock.patch.object(guard, 'active_cloud_hosts', return_value=[]), \
+             mock.patch.object(guard, 'active_cloud_counters', return_value={'origin':0,'p2p':0,'dcdn':0}), \
+             mock.patch.object(guard, 'resolve_cloud_host', return_value=[]):
+            result = guard.audit()
+        self.assertTrue(result['luluExtensionActive'])
+        self.assertTrue(result['luluProviderRunning'])
+        self.assertFalse(result['filterEnabled'])
+        self.assertFalse(result['strictCloudOnly'])
 
     def test_active_cloud_hosts_ignores_peer_urls_and_private_link_parameters(self):
         db_path = self.root / 'tasks.db'

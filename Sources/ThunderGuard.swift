@@ -5,15 +5,44 @@ import AppKit
 struct ThunderGuardApp: App {
     var body: some Scene {
         WindowGroup("迅雷护栏") {
-            TabView {
-                NetworkDashboardView()
-                    .tabItem { Label("网络总览", systemImage: "chart.xyaxis.line") }
-                GuardView()
-                    .tabItem { Label("迅雷规则", systemImage: "shield.lefthalf.filled") }
-                CloudMagnetView()
-                    .tabItem { Label("磁力云添加", systemImage: "cloud.badge.plus") }
-            }
+            MainWindow()
         }
+    }
+}
+
+private struct MainWindow: View {
+    @StateObject private var protection = ProtectionStore()
+    @State private var details = false
+    @State private var magnet = false
+
+    var body: some View {
+        NetworkDashboardView(showProtectionDetails: { details = true })
+            .environmentObject(protection)
+            .toolbar {
+                ToolbarItemGroup {
+                    Button { magnet = true } label: { Label("添加到云盘", systemImage: "cloud.badge.plus") }
+                    Button { details = true } label: { Label("保护详情", systemImage: "slider.horizontal.3") }
+                }
+            }
+            .sheet(isPresented: $details) {
+                VStack(spacing: 0) {
+                    HStack {
+                        Text("保护详情与高级设置").font(.headline)
+                        Spacer()
+                        Button("完成") { details = false }.keyboardShortcut(.cancelAction)
+                    }.padding()
+                    Divider()
+                    GuardView()
+                }.frame(width: 730, height: 700)
+            }
+            .sheet(isPresented: $magnet) {
+                VStack {
+                    HStack { Spacer(); Button("完成") { magnet = false }.keyboardShortcut(.cancelAction) }
+                    CloudMagnetView()
+                }.padding().frame(width: 700, height: 620)
+            }
+            .onAppear { protection.refresh() }
+            .onReceive(Timer.publish(every: 15, on: .main, in: .common).autoconnect()) { _ in protection.refresh() }
     }
 }
 
@@ -21,6 +50,10 @@ private struct GuardAudit: Decodable {
     struct Component: Decodable { let id: String; let fallbackBlock: Bool }
     struct CloudCounters: Decodable { let origin: Int64; let p2p: Int64; let dcdn: Int64 }
     let luluExtensionActive: Bool
+    let filterEnabled: Bool
+    let selectivePeerBlock: Bool
+    let peerPatterns: [String]
+    let peerPorts: [String]
     let luluAppRunning: Bool
     let luluProviderRunning: Bool
     let firewallOn: Bool
@@ -43,8 +76,7 @@ private struct GuardAudit: Decodable {
 
 struct GuardView: View {
     @State private var audit: GuardAudit?
-    @State private var endpoints = ""
-    @State private var cloudHosts = ""
+    @State private var checking = false
     @State private var message = "正在检查…"
     @State private var lastOutput: String?
 
@@ -60,18 +92,10 @@ struct GuardView: View {
                 statusPanel
                 GroupBox("1 · 出站连接：LuLu") {
                     VStack(alignment: .leading, spacing: 12) {
-                        Text("下载服务默认拦截，严格模式的公网出站规则只放行已核实云盘 CDN 的 443 端口及 DNS；迅雷主程序保留云盘控制连接。其他应用的规则会保留。")
-                        TextField("下载服务器域名或 IP，每行一个", text: $endpoints, axis: .vertical)
-                            .lineLimit(3...6)
-                            .textFieldStyle(.roundedBorder)
-                        Text("云盘 CDN 主机名（仅支持已核实的 vod…-vip-lixian.xunlei.com；生成时解析为精确 IP:443 规则）")
-                        if let active = audit?.activeCloudHosts, !active.isEmpty {
-                            Text("当前取回任务：\(active.joined(separator: "、"))")
-                                .font(.caption).textSelection(.enabled)
-                        }
-                        TextField("云盘 CDN 主机名，每行一个", text: $cloudHosts, axis: .vertical)
-                            .lineLimit(2...4)
-                            .textFieldStyle(.roundedBorder)
+                        Text("允许带主机名的连接，拒绝无主机名的 IP 直连和下列已知 peer 目标。不再要求云盘 CDN 的域名或 IP 出现在固定名单中。其他应用规则保留。")
+                        Text("目标：phub / shub.sandai.net 子域名、bt.n0808.com 子域名")
+                        Text("端口：1500、3076、6881–6889、11400、25401")
+                            .font(.caption).textSelection(.enabled)
                         HStack {
                             Button("生成并备份规则") { buildRules() }
                             Button("启动 LuLu") { startLuLu() }
@@ -82,7 +106,7 @@ struct GuardView: View {
                                 }
                             }
                         }
-                        Text("会自动识别正在取回的云盘 CDN。新任务若停在 0%，生成规则后在 LuLu 菜单栏图标的 Rules 菜单中导入 JSON，再点“重新检查”。")
+                        Text("生成后需在 LuLu 菜单栏图标 → Rules → Import 导入 JSON。会替换旧的迅雷默认拒绝规则，不再维护云盘 IP 白名单。")
                             .font(.caption).foregroundStyle(.secondary)
                     }.frame(maxWidth: .infinity, alignment: .leading).padding(8)
                 }
@@ -101,7 +125,7 @@ struct GuardView: View {
                 }
                 GroupBox("3 · 验证") {
                     VStack(alignment: .leading, spacing: 10) {
-                        Text("先实测云盘取回进度，再核对 LuLu 对 1500 端口和未知 IP 的判定。仅看规则文件无法证明上传为零。")
+                        Text("核对实际取回速度及下列任务计数。此模式按已知目标与端口拦截，不是所有 P2P 协议的自动识别器；有域名的 P2P 也可能获准，只有 IP 的正常服务也可能被拦。")
                         Button("重新检查") { refresh() }
                         Text(message).font(.system(.caption, design: .monospaced)).textSelection(.enabled)
                     }.frame(maxWidth: .infinity, alignment: .leading).padding(8)
@@ -129,11 +153,9 @@ struct GuardView: View {
         GroupBox("当前状态") {
             VStack(alignment: .leading, spacing: 6) {
                 status("LuLu 主程序", audit?.luluAppRunning == true)
+                status("LuLu 实际过滤开关", audit?.filterEnabled == true)
                 status("LuLu 过滤进程和系统扩展", audit?.luluProviderRunning == true && audit?.luluExtensionActive == true)
-                status("迅雷主程序与下载服务规则档案", audit?.components.first(where: {$0.id == "com.xunlei.Thunder"})?.fallbackBlock == true && audit?.components.first(where: {$0.id == "com.xunlei.DownloadService"})?.fallbackBlock == true)
-                status("当前 DNS 服务器的 53 端口例外", audit?.dnsExceptionsPresent == true)
-                status("当前云盘 CDN 的精确 IP:443 例外", audit?.cloudExceptionsPresent == true)
-                status("下载服务公网规则仅允许云盘 CDN 与 DNS", audit?.strictCloudOnly == true)
+                status("域名连接允许 / IP 直连拒绝规则", audit?.selectivePeerBlock == true)
                 if let counters = audit?.activeCloudCounters,
                    audit?.activeCloudHosts.isEmpty == false {
                     status("当前取回任务 P2P / DCDN 计数为零", counters.p2p == 0 && counters.dcdn == 0)
@@ -142,12 +164,11 @@ struct GuardView: View {
                 }
                 status("系统防火墙", audit?.firewallOn == true)
                 status("迅雷与下载服务入站规则", audit?.inboundMainBlocked == true && audit?.inboundServiceBlocked == true)
-                Text("独立实测：Mini 关闭时云盘副本进度增长；LuLu 同时拒绝了 sandai.net:3076 等非云盘连接。")
-                    .foregroundStyle(.secondary)
-                if audit?.luluAppRunning != true { Text("⚠ LuLu 主程序未运行：请启动后再依赖迅雷拦截规则") }
-                if audit?.dnsExceptionsPresent != true { Text("⚠ DNS 例外不完整：云盘取回可能停在 0%；请重新生成并导入规则") }
-                if audit?.cloudExceptionsPresent != true { Text("⚠ 云盘 CDN 的 IP 例外不完整：请重新生成并导入规则") }
-                if audit?.strictCloudOnly != true { Text("⚠ 下载服务仍有云盘 CDN 与 DNS 之外的放行规则：请导入严格模式规则") }
+                if let audit {
+                    if !audit.luluAppRunning { Text("⚠ LuLu 主程序未运行：请启动后再依赖迅雷拦截规则") }
+                    if !audit.filterEnabled { Text("⚠ LuLu 已停用：规则当前不会拦截连接。请在 LuLu 菜单栏选择 Enable。") }
+                    if !audit.selectivePeerBlock { Text("当前使用旧规则；新版简化规则尚未应用。") }
+                }
                 if audit?.globalAllowList == true { Text("⚠ LuLu 全局放行列表可能绕过迅雷规则") }
                 if audit?.localhostBypass == true { Text("⚠ LuLu 当前放行本机回环连接") }
                 Text("规则档案和进程状态不能代替流量实测；不能保证识别所有加密 P2P。")
@@ -157,15 +178,15 @@ struct GuardView: View {
     }
 
     private func status(_ title: String, _ active: Bool) -> some View {
-        Text("\(active ? "●" : "○") \(title)：\(active ? "已检测" : "待完成")")
-            .foregroundStyle(active ? Color.green : Color.orange)
+        Text("\(active ? "●" : "○") \(title)：\(audit == nil ? "检查中" : active ? "已检测" : "待完成")")
+            .foregroundStyle(audit == nil ? Color.secondary : active ? Color.green : Color.orange)
     }
 
     private func formatBytes(_ bytes: Int64) -> String {
         bytes == 0 ? "0 B" : ByteCountFormatter.string(fromByteCount: bytes, countStyle: .file)
     }
 
-    private func run(_ args: [String]) throws -> Data {
+    nonisolated private static func run(_ tool: URL, _ args: [String]) throws -> Data {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/python3")
         process.arguments = [tool.path] + args
@@ -182,24 +203,22 @@ struct GuardView: View {
     }
 
     private func refresh() {
-        do {
-            audit = try JSONDecoder().decode(GuardAudit.self, from: run(["audit"]))
-            if endpoints.isEmpty { endpoints = audit?.allowEndpoints.joined(separator: "\n") ?? "" }
-            let entered = cloudHosts.split(whereSeparator: \.isNewline).map(String.init)
-            cloudHosts = Array(NSOrderedSet(array: entered + (audit?.cloudHosts ?? [])))
-                .compactMap { $0 as? String }.joined(separator: "\n")
-            let count = audit?.components.filter(\.fallbackBlock).count ?? 0
-            message = "找到 \(audit?.components.count ?? 0) 个迅雷组件；其中 \(count) 个具有默认拦截规则。"
-        } catch { message = error.localizedDescription }
+        guard !checking else { return }
+        checking = true
+        let script = tool
+        Task {
+            let result = await Task.detached { Result { try Self.run(script, ["audit"]) } }.value
+            defer { checking = false }
+            do {
+                audit = try JSONDecoder().decode(GuardAudit.self, from: result.get())
+                message = "找到 \(audit?.components.count ?? 0) 个迅雷组件。过滤开关：\(audit?.filterEnabled == true ? "开启" : "停用")。"
+            } catch { message = error.localizedDescription }
+        }
     }
 
     private func buildRules() {
         do {
-            refresh()
-            let hosts = endpoints.split(whereSeparator: { $0 == "\n" || $0 == "," }).map(String.init)
-            let clouds = cloudHosts.split(whereSeparator: { $0 == "\n" || $0 == "," }).map(String.init)
-            let args = ["prepare"] + hosts.flatMap { ["--allow", $0] } + clouds.flatMap { ["--cloud-host", $0] }
-            let json = try JSONSerialization.jsonObject(with: run(args)) as? [String: Any]
+            let json = try JSONSerialization.jsonObject(with: Self.run(tool, ["prepare"])) as? [String: Any]
             lastOutput = json?["output"] as? String
             message = "已备份原规则并生成合并文件：\(lastOutput ?? "未知路径")。尚未导入 LuLu。"
         } catch { message = error.localizedDescription }
