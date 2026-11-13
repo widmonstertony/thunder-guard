@@ -2,7 +2,7 @@
 set -euo pipefail
 cd "${0:A:h}"
 
-version=0.4.1
+version=0.4.2
 upstream='Build/LuLu-4.5.3-backup.app'
 if [[ ! -d "$upstream" ]]; then
     upstream='/Applications/LuLu.app'
@@ -25,6 +25,13 @@ scripts='Build/ReleaseScripts'
 /bin/cat > "$scripts/postinstall" <<'SCRIPT'
 #!/bin/zsh
 set -euo pipefail
+# Retire only Thunder Guard's legacy watchdog, including for logged-out users.
+# Renaming preserves a backup but prevents launchd from loading it on login.
+for agent in /Users/*/Library/LaunchAgents/local.thunderguard.monitor.plist(N); do
+    owner_uid=$(/usr/bin/stat -f %u "$agent")
+    /bin/launchctl bootout "gui/${owner_uid}/local.thunderguard.monitor" >/dev/null 2>&1 || true
+    /bin/mv "$agent" "${agent}.disabled-$(/bin/date +%Y%m%d-%H%M%S)-$$"
+done
 source_app='/Library/Application Support/ThunderGuard/BundledLuLu.app'
 target_app='/Applications/LuLu.app'
 if [[ ! -d "$target_app" ]]; then

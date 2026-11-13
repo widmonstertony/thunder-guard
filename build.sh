@@ -12,7 +12,8 @@ done
 /usr/bin/iconutil -c icns Build/ThunderGuard.iconset -o 'Build/Thunder Guard.app/Contents/Resources/ThunderGuard.icns'
 swiftc -parse-as-library -swift-version 5 -O -module-cache-path Build/ModuleCache -framework SwiftUI -framework AppKit -framework Charts Sources/ThunderGuard.swift Sources/NetworkDashboard.swift Sources/CloudMagnetView.swift Sources/ProtectionStore.swift Sources/DecisionStore.swift -o 'Build/Thunder Guard.app/Contents/MacOS/Thunder Guard'
 cp Sources/guard.py 'Build/Thunder Guard.app/Contents/Resources/guard.py'
-cp Sources/monitor.py 'Build/Thunder Guard.app/Contents/Resources/monitor.py'
+# Clean incremental builds made before the legacy watchdog was removed.
+rm -f 'Build/Thunder Guard.app/Contents/Resources/monitor.py'
 cp Sources/network_snapshot.py 'Build/Thunder Guard.app/Contents/Resources/network_snapshot.py'
 cat > 'Build/Thunder Guard.app/Contents/Info.plist' <<'PLIST'
 <?xml version="1.0" encoding="UTF-8"?>
@@ -24,8 +25,8 @@ cat > 'Build/Thunder Guard.app/Contents/Info.plist' <<'PLIST'
 <key>CFBundleExecutable</key><string>Thunder Guard</string>
 <key>CFBundleIconFile</key><string>ThunderGuard</string>
 <key>CFBundlePackageType</key><string>APPL</string>
-<key>CFBundleVersion</key><string>8</string>
-<key>CFBundleShortVersionString</key><string>0.4.1</string>
+<key>CFBundleVersion</key><string>9</string>
+<key>CFBundleShortVersionString</key><string>0.4.2</string>
 <key>LSMinimumSystemVersion</key><string>14.0</string>
 </dict></plist>
 PLIST

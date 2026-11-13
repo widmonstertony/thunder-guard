@@ -1,6 +1,8 @@
 # Thunder Guard / 迅雷护栏
 
-Free macOS connection dashboard and Thunder firewall controller. It does not modify Thunder. Version 0.4.1 is a dashboard preview, not a finished one-click Mini replacement: outbound rule changes still require LuLu's import interface. Opening the dashboard reads existing rules and does not change network policy.
+Free macOS connection dashboard and Thunder firewall controller. It does not modify Thunder. Version 0.4.2 is a dashboard preview, not a finished one-click Mini replacement: outbound rule changes still require LuLu's import interface. Opening the dashboard reads existing rules and does not change network policy.
+
+Thunder Guard respects quitting LuLu. The legacy 10-second auto-restart watchdog has been removed. The 0.4.2 package retires its old LaunchAgent and preserves a disabled backup; a source checkout can run `./uninstall-monitor.sh` for the current user. The old `install-monitor.sh` command now performs the same cleanup instead of installing a background job. No LuLu login setting, system extension or firewall rule is changed by this cleanup.
 
 ## One download, two signed components
 
