@@ -4,6 +4,8 @@ Free macOS connection dashboard and Thunder firewall controller. It does not mod
 
 Thunder Guard respects quitting LuLu. The legacy 10-second auto-restart watchdog has been removed. The 0.4.2 package retires its old LaunchAgent and preserves a disabled backup; a source checkout can run `./uninstall-monitor.sh` for the current user. The old `install-monitor.sh` command now performs the same cleanup instead of installing a background job. No LuLu login setting, system extension or firewall rule is changed by this cleanup.
 
+A separate [source-integrated development target](Integration/README.md) now builds the LuLu engine, native rule editor and Thunder Guard dashboard into one app with an embedded extension. It is compile-only: the required signing profiles are unavailable, so activation and runtime acceptance are not verified. It is not the app shipped in the 0.4.x releases.
+
 ## One download, two signed components
 
 The Release package installs Thunder Guard and, only if missing, Objective-See's signed LuLu. The user downloads one package and uses Thunder Guard as the main entry point. macOS still runs LuLu as a separate app and Network Extension. This is necessary because a custom Network Extension needs Apple's restricted entitlement; copying open-source code into an ad hoc signed app would disable the filter. Netiquette is bundled with LuLu. Source snapshots for both are in `Vendor/`, with licensing and version details in [UPSTREAM.md](UPSTREAM.md).
