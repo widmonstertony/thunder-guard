@@ -23,6 +23,10 @@ class IntegrationTests(unittest.TestCase):
             objects = project['objects']
             targets = [obj for obj in objects.values() if obj.get('isa') == 'PBXNativeTarget']
             self.assertEqual(len(targets), 2)
+            attributes = objects[project['rootObject']]['attributes']['TargetAttributes']
+            for key, target in objects.items():
+                if target.get('isa') == 'PBXNativeTarget':
+                    self.assertEqual(attributes[key]['SystemCapabilities']['com.apple.NetworkExtensions']['enabled'], 1)
             app = next(obj for obj in targets if obj['name'] == 'LuLu')
             configurations = objects[app['buildConfigurationList']]['buildConfigurations']
             for config in configurations:

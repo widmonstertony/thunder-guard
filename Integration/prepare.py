@@ -176,6 +176,17 @@ def generate(destination, team, identity):
         phase = objects[key]
         if phase.get('isa') == 'PBXCopyFilesBuildPhase':
             phase['buildActionMask'] = 2147483647
+    target_attributes = objects[project['rootObject']]['attributes']['TargetAttributes']
+    for key, target in objects.items():
+        if target.get('isa') != 'PBXNativeTarget':
+            continue
+        capabilities = {
+            'com.apple.NetworkExtensions': {'enabled': 1},
+            'com.apple.ApplicationGroups.Mac': {'enabled': 1},
+        }
+        if target is app:
+            capabilities['com.apple.SystemExtension'] = {'enabled': 1}
+        target_attributes.setdefault(key, {})['SystemCapabilities'] = capabilities
     project_path.write_bytes(plistlib.dumps(project, sort_keys=False))
     # Keep licensing and attribution beside generated sources.
     shutil.copyfile(REPO / 'Vendor/LuLu/LICENSE.md', destination / 'LuLu-LICENSE.md')
