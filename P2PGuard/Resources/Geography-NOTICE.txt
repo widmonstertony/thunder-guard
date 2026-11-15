@@ -1,0 +1,6 @@
+IP Geolocation by DB-IP, https://db-ip.com/ — DB-IP Country Lite, November 2026,
+Creative Commons Attribution 4.0, https://creativecommons.org/licenses/by/4.0/.
+The original CSV has been converted to sorted binary IPv4/IPv6 ranges.
+Map label coordinates: Natural Earth v5.1.2, public domain,
+https://www.naturalearthdata.com/about/terms-of-use/.
+Coordinates are representative positions for countries or regions, not host locations.

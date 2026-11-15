@@ -43,6 +43,16 @@ def validate_profile(path, identifier, team, fingerprint, host):
     return rights
 
 
+def validate_filter_service(info, entitlements, team):
+    """Match the NetworkExtension category check on the compiled product."""
+    service = info.get('NetworkExtension', {}).get('NEMachServiceName')
+    group = f'{team}.{PREFIX}'
+    if service != f'{group}.service' or group not in entitlements.get('com.apple.security.application-groups', []):
+        raise ValueError('Network filter Mach service must use the signed application-group prefix')
+    if not info['NetworkExtension'].get('NEProviderClasses', {}).get('com.apple.networkextension.filter-data'):
+        raise ValueError('Network filter data provider class is missing')
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--team', required=True)
@@ -51,6 +61,12 @@ def main():
     parser.add_argument('--extension-profile', required=True, type=pathlib.Path)
     parser.add_argument('--source', type=pathlib.Path,
         default=ROOT / 'Build/IntegratedDerived/Build/Products/Release/ThunderGuard.app')
+    parser.add_argument('--output', type=pathlib.Path,
+        default=ROOT / 'Build/IntegratedSigned/ThunderGuard.app')
+    parser.add_argument('--host-entitlements', type=pathlib.Path,
+        default=ROOT / 'Build/IntegratedSource/App/App.entitlements')
+    parser.add_argument('--extension-entitlements', type=pathlib.Path,
+        default=ROOT / 'Build/IntegratedSource/Extension/Extension.entitlements')
     args = parser.parse_args()
     identities = run('/usr/bin/security', 'find-identity', '-v', '-p', 'codesigning').decode()
     fingerprint = next((match.group(1) for line in identities.splitlines()
@@ -65,7 +81,9 @@ def main():
         validated.append((suffix, profile, rights))
 
     source = args.source.resolve()
-    output = ROOT / 'Build/IntegratedSigned/ThunderGuard.app'
+    output = args.output.resolve()
+    if not output.is_relative_to(ROOT / 'Build') or output.name != 'ThunderGuard.app':
+        raise ValueError('Output must be named ThunderGuard.app and live under Build/')
     if source == output.resolve():
         raise ValueError('The signing output must be separate from its source')
     if output.exists():
@@ -78,10 +96,12 @@ def main():
         info = plistlib.loads((bundle / 'Contents/Info.plist').read_bytes())
         if info['CFBundleIdentifier'] != PREFIX + '.' + suffix:
             raise ValueError('Compiled bundle identifier mismatch')
-        entitlement_source = ROOT / 'Build/IntegratedSource' / ('App/App.entitlements' if suffix == 'app' else 'Extension/Extension.entitlements')
+        entitlement_source = args.host_entitlements if suffix == 'app' else args.extension_entitlements
         entitlements = plistlib.loads(entitlement_source.read_text().replace('$(TeamIdentifierPrefix)', args.team + '.').encode())
         for key in ['com.apple.application-identifier', 'com.apple.developer.team-identifier']:
             entitlements[key] = rights[key]
+        if suffix == 'extension':
+            validate_filter_service(info, entitlements, args.team)
         allowed_groups = rights.get('com.apple.security.application-groups', [])
         for group in entitlements.get('com.apple.security.application-groups', []):
             if not any(group == allowed or (allowed.endswith('.*') and group.startswith(allowed[:-1])) for allowed in allowed_groups):

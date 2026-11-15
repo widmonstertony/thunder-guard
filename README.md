@@ -1,4 +1,8 @@
-# Thunder Guard / 迅雷护栏
+# TonTon P2PGuard
+
+A native macOS connection monitor with a Thunder BitTorrent filtering profile and a map of observed connections and denials. The 0.6.3 candidate runs independently of LuLu. See [the standalone app, build and test instructions](P2PGuard/README.md), or [report an issue](https://github.com/widmonstertony/thunder-guard/issues).
+
+## Historical Thunder Guard builds
 
 Free macOS connection dashboard and Thunder firewall controller. It does not modify Thunder. Version 0.4.2 is a dashboard preview, not a finished one-click Mini replacement: outbound rule changes still require LuLu's import interface. Opening the dashboard reads existing rules and does not change network policy.
 

@@ -30,6 +30,17 @@ class ProfileValidationTests(unittest.TestCase):
     def test_distribution_profile_is_accepted(self):
         self.assertTrue(self.validate(self.profile())['com.apple.developer.system-extension.install'])
 
+    def test_unsigned_build_cannot_drop_team_prefix(self):
+        group = 'TESTTEAM01.org.thunderguard.firewall'
+        entitlements = {'com.apple.security.application-groups': [group]}
+        network = {'NEMachServiceName': f'{group}.service',
+                   'NEProviderClasses': {'com.apple.networkextension.filter-data': 'FilterDataProvider'}}
+        signing.validate_filter_service({'NetworkExtension': network}, entitlements, 'TESTTEAM01')
+        for invalid_service in ('org.thunderguard.firewall', 'OTHERTEAM0.org.thunderguard.firewall.service'):
+            network['NEMachServiceName'] = invalid_service
+            with self.assertRaisesRegex(ValueError, 'application-group prefix'):
+                signing.validate_filter_service({'NetworkExtension': network}, entitlements, 'TESTTEAM01')
+
     def test_unrelated_or_debug_profiles_are_rejected(self):
         for mutate in [
             lambda p: p.update(TeamIdentifier=['OTHERTEAM0']),
