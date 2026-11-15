@@ -28,10 +28,12 @@
 @interface FixtureProvider : PGFilterProvider
 @property NEFilterProviderConfiguration *config;
 @property NSString *processPath;
+@property NSString *app;
 @end
 @implementation FixtureProvider
 - (NEFilterProviderConfiguration *)filterConfiguration { return self.config; }
 - (NSString *)thunderPath:(NSData *)token { return self.processPath; }
+- (NSString *)applicationID:(NSData *)token { return self.app; }
 - (NSSet<NSString *> *)addressesForName:(NSString *)name { return [NSSet setWithObject:@"192.0.2.80"]; }
 @end
 
@@ -160,5 +162,51 @@ int main(void) {
         }
         guard.processPath = nil;
         same([guard handleNewFlow:direct], [NEFilterNewFlowVerdict allowVerdict]);
+
+        // Non-Thunder apps are opt-in unless covered by a global rule.
+        guard.app = @"org.example.PeerClient";
+        guard.config.vendorConfiguration = @{@"blockAllBT": @NO};
+        same([guard handleNewFlow:direct], [NEFilterNewFlowVerdict allowVerdict]);
+        guard.config.vendorConfiguration = @{@"blockAllBT": @YES,
+            @"appBTOverrides": @{guard.app: @"allow"}};
+        same([guard handleNewFlow:direct], [NEFilterNewFlowVerdict allowVerdict]);
+        guard.config.vendorConfiguration = @{@"blockAllBT": @NO,
+            @"appBTOverrides": @{guard.app: @"block"}};
+        inspectBoth.shouldReport = YES;
+        same([guard handleNewFlow:direct], inspectBoth);
+        same(step(guard, direct, NO, 0, ascii(@"ordinary unknown protocol")), [NEFilterDataVerdict allowVerdict]);
+        NSUUID *normalID = direct.identifier;
+        assert(guard.sessions[normalID].mode == PGModeDone);
+
+        // Inherit global policy when no explicit exception exists. Each
+        // direction passes a split handshake, passes a metadata message, then
+        // denies a file message. A normal generic App keeps its TCP traffic.
+        guard.config.vendorConfiguration = @{@"blockAllBT": @YES};
+        for (NSNumber *incoming in @[@NO, @YES]) {
+            NEFilterSocketFlow *peer = flow(@"192.0.2.35", @"443", @"named.example.org");
+            same([guard handleNewFlow:peer], inspectBoth);
+            NSData *hello = [NSData dataWithBytes:"\023BitTorrent protocol\0\0\0\0\0\0\0\0"
+                              "aaaaaaaaaaaaaaaaaaaabbbbbbbbbbbbbbbbbbbb" length:68];
+            BOOL rx = incoming.boolValue;
+            same(step(guard, peer, rx, 0, [hello subdataWithRange:NSMakeRange(0, 1)]),
+                 [NEFilterDataVerdict dataVerdictWithPassBytes:0 peekBytes:20]);
+            same(step(guard, peer, rx, 1, [hello subdataWithRange:NSMakeRange(1, 67)]),
+                 [NEFilterDataVerdict dataVerdictWithPassBytes:68 peekBytes:4]);
+
+            NSData *metadata = extended(5, @"d8:msg_typei0e5:piecei0ee");
+            unsigned char bytes[] = { 7, 0,0,0,0, 0,0,0,0, 'f' };
+            NSData *piece = frame([NSData dataWithBytes:bytes length:sizeof bytes]);
+            NSMutableData *both = [metadata mutableCopy];
+            [both appendData:piece];
+            same(step(guard, peer, rx, 68, both),
+                 [NEFilterDataVerdict dataVerdictWithPassBytes:metadata.length peekBytes:5]);
+            same(step(guard, peer, rx, 68 + metadata.length, piece), [NEFilterDataVerdict dropVerdict]);
+            assert([guard.sessions[peer.identifier].appID isEqualToString:guard.app]);
+        }
+
+        guard.app = nil; // system sockets without a stable app ID still inherit global.
+        same([guard handleNewFlow:flow(@"192.0.2.35", @"40000", nil)], inspectBoth);
+        guard.app = @"org.thunderguard.firewall.app";
+        same([guard handleNewFlow:flow(@"192.0.2.35", @"40000", nil)], [NEFilterNewFlowVerdict allowVerdict]);
     }
 }

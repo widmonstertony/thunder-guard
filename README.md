@@ -1,6 +1,6 @@
 # TonTon P2PGuard
 
-A native macOS connection monitor with a Thunder BitTorrent filtering profile and a map of observed connections and denials. The 0.6.3 candidate runs independently of LuLu. See [the standalone app, build and test instructions](P2PGuard/README.md), or [report an issue](https://github.com/widmonstertony/thunder-guard/issues).
+A native macOS network monitor with an app-by-app BitTorrent file rule, a connection map and separate upload and download denials. TonTon P2PGuard 0.6.4 runs independently of LuLu. See [the standalone app, build and test instructions](P2PGuard/README.md), or [report an issue](https://github.com/widmonstertony/thunder-guard/issues).
 
 ## Historical Thunder Guard builds
 

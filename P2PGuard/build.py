@@ -25,7 +25,7 @@ def bundle(path, name, title, identifier, kind, extra):
         'CFBundleDevelopmentRegion': 'zh_CN', 'CFBundleDisplayName': title,
         'CFBundleName': title, 'CFBundleExecutable': name, 'CFBundleIdentifier': identifier,
         'CFBundleInfoDictionaryVersion': '6.0', 'CFBundlePackageType': kind,
-        'CFBundleVersion': '16', 'CFBundleShortVersionString': '0.6.3',
+        'CFBundleVersion': '17', 'CFBundleShortVersionString': '0.6.4',
         'LSMinimumSystemVersion': '14.0', **extra,
     })
     return path / 'Contents/MacOS' / name
@@ -42,12 +42,12 @@ def build(team):
     if app.exists():
         shutil.rmtree(app)
     group = f'{team}.{PREFIX}'
-    description = 'P2P 护栏需要网络过滤扩展来执行你为迅雷选择的拦截规则。'
-    host = bundle(app, 'ThunderGuard', 'P2P 护栏', APP, 'APPL', {
+    description = 'TonTon P2PGuard 需要网络过滤扩展来执行你为本机 App 选择的拦截规则。'
+    host = bundle(app, 'ThunderGuard', 'TonTon P2PGuard', APP, 'APPL', {
         'NSPrincipalClass': 'NSApplication', 'CFBundleIconFile': 'P2PGuard',
         'NSSystemExtensionUsageDescription': description,
     })
-    extension = bundle(filter_bundle, EXTENSION, 'P2P 护栏网络过滤器', EXTENSION, 'SYSX', {
+    extension = bundle(filter_bundle, EXTENSION, 'TonTon P2PGuard 网络过滤器', EXTENSION, 'SYSX', {
         'NSSystemExtensionUsageDescription': description,
         'NetworkExtension': {'NEMachServiceName': f'{group}.service', 'NEProviderClasses': {
             'com.apple.networkextension.filter-data': 'PGFilterProvider'}},

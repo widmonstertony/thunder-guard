@@ -4,61 +4,70 @@ import SystemExtensions
 
 @MainActor final class FilterControl: NSObject, ObservableObject, OSSystemExtensionRequestDelegate {
     static let identifier = "org.thunderguard.firewall.extension"
-    @Published private(set) var enabled = false
-    @Published private(set) var directIP = false
+    @Published private(set) var policy = GuardPolicy()
     @Published private(set) var configured = false
     @Published private(set) var busy = false
     @Published private(set) var note: String?
     private let manager = NEFilterManager.shared()
-    private var pending: (bt: Bool, ip: Bool)?
+    private var pending: GuardPolicy?
 
     func load() async {
         guard !busy else { return }
         do {
             try await manager.loadFromPreferences()
-            configured = manager.isEnabled && manager.providerConfiguration?.filterDataProviderBundleIdentifier == Self.identifier
-            enabled = configured && (manager.providerConfiguration?.vendorConfiguration?["blockThunderBT"] as? Bool == true)
-            directIP = configured && (manager.providerConfiguration?.vendorConfiguration?["blockThunderIP"] as? Bool == true)
+            guard !busy else { return }
+            readPreferences()
         } catch { note = error.localizedDescription }
     }
 
-    func change(bt: Bool, ip: Bool) {
+    private func readPreferences() {
+        let config = manager.providerConfiguration
+        let ownsConfig = config?.filterDataProviderBundleIdentifier == Self.identifier
+        let active = manager.isEnabled && ownsConfig
+        let saved = GuardPolicy(vendorConfiguration: ownsConfig ? config?.vendorConfiguration ?? [:] : [:])
+        if configured != active { configured = active }
+        if policy != saved { policy = saved }
+    }
+
+    func change(to policy: GuardPolicy) {
         guard !busy else { return }
         note = nil
         busy = true
-        pending = (bt, ip)
-        if bt || ip {
+        pending = policy
+        if policy.needsFilter {
             let request = OSSystemExtensionRequest.activationRequest(forExtensionWithIdentifier: Self.identifier, queue: .main)
             request.delegate = self
             OSSystemExtensionManager.shared.submitRequest(request)
         } else {
-            Task { await persist(bt: false, ip: false) }
+            Task { await persist(policy) }
         }
     }
 
-    private func persist(bt: Bool, ip: Bool) async {
+    private func persist(_ policy: GuardPolicy) async {
         defer { busy = false; pending = nil }
         do {
             try await manager.loadFromPreferences()
             let config = manager.providerConfiguration ?? NEFilterProviderConfiguration()
+            if let id = config.filterDataProviderBundleIdentifier, id != Self.identifier {
+                note = "现有配置属于另一个过滤器。"
+                return
+            }
             config.filterSockets = true
             config.filterPackets = false
             config.filterDataProviderBundleIdentifier = Self.identifier
-            config.vendorConfiguration = ["blockThunderBT": bt, "blockThunderIP": ip]
+            config.vendorConfiguration = policy.vendorConfiguration
             manager.providerConfiguration = config
-            manager.localizedDescription = "P2P 护栏"
-            manager.isEnabled = true
+            manager.localizedDescription = "TonTon P2PGuard"
+            manager.isEnabled = manager.isEnabled || policy.needsFilter
             try await manager.saveToPreferences()
             try await manager.loadFromPreferences()
-            configured = manager.isEnabled
-            enabled = configured && (manager.providerConfiguration?.vendorConfiguration?["blockThunderBT"] as? Bool == true)
-            directIP = configured && (manager.providerConfiguration?.vendorConfiguration?["blockThunderIP"] as? Bool == true)
-            note = (bt || ip) ? "已保存策略，将检查迅雷的新连接。" : "已关闭拦截。"
+            readPreferences()
+            note = policy.needsFilter ? "已保存，将检查受保护 App 的新连接。" : "已保存。"
         } catch { note = error.localizedDescription }
     }
 
     nonisolated func requestNeedsUserApproval(_ request: OSSystemExtensionRequest) {
-        Task { @MainActor in note = "请在系统设置 → 登录项与扩展 → 网络扩展中允许 P2P 护栏。" }
+        Task { @MainActor in note = "请在系统设置 → 登录项与扩展 → 网络扩展中允许 TonTon P2PGuard。" }
     }
 
     nonisolated func request(_ request: OSSystemExtensionRequest, actionForReplacingExtension existing: OSSystemExtensionProperties,
@@ -69,13 +78,13 @@ import SystemExtensions
     nonisolated func request(_ request: OSSystemExtensionRequest, didFinishWithResult result: OSSystemExtensionRequest.Result) {
         Task { @MainActor in
             if result == .willCompleteAfterReboot {
-                note = "扩展将在重启后更新。"; busy = false
-            } else if let pending { await persist(bt: pending.bt, ip: pending.ip) }
+                note = "扩展将在重启后更新。"; busy = false; pending = nil
+            } else if let pending { await persist(pending) }
             else { busy = false }
         }
     }
 
     nonisolated func request(_ request: OSSystemExtensionRequest, didFailWithError error: Error) {
-        Task { @MainActor in note = error.localizedDescription; busy = false }
+        Task { @MainActor in note = error.localizedDescription; busy = false; pending = nil }
     }
 }

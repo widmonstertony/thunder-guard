@@ -14,7 +14,17 @@ struct NetworkProcess: Identifiable {
     let id: Int32
     let name: String
     var connections: [AppConnection] = []
-    var thunder: Bool { name == "Thunder" || name == "DownloadService" || name == "XLEmbeddedPlayer" || name == "迅雷" }
+    var appID: String?
+    var groupID: String { appID.map { "app:" + $0 } ?? "process:" + name }
+}
+
+struct MonitoredApp: Identifiable {
+    let id: String
+    let name: String
+    var appID: String?
+    var icon: NSImage?
+    var processes: [NetworkProcess] = []
+    var connectionCount: Int { processes.reduce(0) { $0 + $1.connections.count } }
 }
 
 struct BlockEvent: Identifiable, Decodable {
@@ -27,12 +37,18 @@ struct BlockEvent: Identifiable, Decodable {
     let direction: Direction
     let reason: String
     let detail: String?
+    var appID: String? { app == "thunder" ? GuardPolicy.thunderID : app.isEmpty ? nil : app }
+    var groupID: String { appID.map { "app:" + $0 } ?? "process:" + process }
     enum Direction: String, Decodable { case upload, download, connection }
     var endpoint: String { guard !address.isEmpty else { return "—" }; return address.contains(":") ? "[\(address)]:\(port)" : "\(address):\(port)" }
     var isFile: Bool { reason == "bt-file" && direction != .connection }
     var verdictTitle: String {
         if isFile { return direction == .upload ? "已拦截 BT 上传" : "已拦截 BT 下载" }
-        return reason == "bt-control" ? "已拦截 BT 控制消息" : "已拒绝 IP 直连"
+        switch reason {
+        case "bt-control": return "已拦截 BT 控制消息"
+        case "inspection-offset", "inspection-capacity": return "已拒绝检查异常的连接"
+        default: return "已拒绝 IP 直连"
+        }
     }
     var rationale: String {
         if isFile {
@@ -53,8 +69,8 @@ struct BlockEvent: Identifiable, Decodable {
 
 @MainActor final class Activity: ObservableObject {
     @Published private(set) var processes: [NetworkProcess] = []
+    @Published private(set) var runningApps: [MonitoredApp] = []
     @Published private(set) var events: [BlockEvent] = []
-    @Published private(set) var observedThunder = false
     @Published private(set) var status: String?
     private var sampling = false
     private var reader: Task<Void, Never>?
@@ -63,9 +79,26 @@ struct BlockEvent: Identifiable, Decodable {
         guard !sampling else { return }
         sampling = true
         defer { sampling = false }
+        let observed = NSWorkspace.shared.runningApplications
+        runningApps = observed.compactMap { app in
+            guard app.activationPolicy == .regular, let id = app.bundleIdentifier else { return nil }
+            return MonitoredApp(id: "app:" + id, name: app.localizedName ?? id, appID: id, icon: app.icon)
+        }
         do {
             let snapshot = try await Task.detached(priority: .utility) { try Self.networkSnapshot() }.value
-            processes = snapshot
+            let ids = observed.reduce(into: [Int32: String]()) { result, app in
+                result[app.processIdentifier] = app.bundleIdentifier
+            }
+            let thunderRunning = observed.contains { $0.bundleIdentifier == GuardPolicy.thunderID }
+            processes = snapshot.map { process in
+                var process = process
+                process.appID = ids[process.id]
+                if process.appID == nil, thunderRunning,
+                   ["Thunder", "迅雷", "DownloadService", "XLEmbeddedPlayer", "ThunderHelper"].contains(process.name) {
+                    process.appID = GuardPolicy.thunderID
+                }
+                return process
+            }
             status = nil
         } catch { status = "暂时无法读取系统连接。" }
     }
@@ -75,10 +108,7 @@ struct BlockEvent: Identifiable, Decodable {
         reader = Task { [weak self] in
             while !Task.isCancelled {
                 let evidence = await Task.detached(priority: .utility) { Self.readEvidence() }.value
-                if let evidence {
-                    self?.events = evidence.events
-                    self?.observedThunder = evidence.observedThunder
-                }
+                if let evidence { self?.events = evidence }
                 try? await Task.sleep(for: .seconds(5))
             }
         }
@@ -100,16 +130,15 @@ struct BlockEvent: Identifiable, Decodable {
         return String(decoding: data, as: UTF8.self)
     }
 
-    private nonisolated static func readEvidence() -> (events: [BlockEvent], observedThunder: Bool)? {
+    private nonisolated static func readEvidence() -> [BlockEvent]? {
         guard let log = try? run("/usr/bin/log", ["show", "--last", "10m", "--style", "compact", "--predicate",
-            #"subsystem == "org.thunderguard.firewall" AND category == "packet-evidence" AND (eventMessage BEGINSWITH "P2PGUARD_BLOCK " OR eventMessage BEGINSWITH "P2PGUARD_FLOW ")"#])
+            #"subsystem == "org.thunderguard.firewall" AND category == "packet-evidence" AND eventMessage BEGINSWITH "P2PGUARD_BLOCK ""#])
         else { return nil }
-        let events: [BlockEvent] = log.split(separator: "\n").lazy.filter { $0.contains("P2PGUARD_BLOCK ") }
+        return log.split(separator: "\n").lazy.filter { $0.contains("P2PGUARD_BLOCK ") }
             .suffix(250).reversed().compactMap { line in
             guard let tag = line.range(of: "P2PGUARD_BLOCK ") else { return nil }
             return try? JSONDecoder().decode(BlockEvent.self, from: Data(line[tag.upperBound...].utf8))
         }
-        return (events, log.contains("P2PGUARD_FLOW "))
     }
 
     private nonisolated static func networkSnapshot() throws -> [NetworkProcess] {

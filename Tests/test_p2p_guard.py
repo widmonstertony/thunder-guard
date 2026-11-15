@@ -7,6 +7,14 @@ ROOT = pathlib.Path(__file__).resolve().parents[1]
 
 
 class P2PGuardTests(unittest.TestCase):
+    def test_app_policy_migrates_and_round_trips_exceptions(self):
+        with tempfile.TemporaryDirectory() as temp:
+            exe = pathlib.Path(temp) / 'guard-policy'
+            subprocess.run(['swiftc', '-parse-as-library', '-module-cache-path', str(pathlib.Path(temp) / 'Modules'),
+                            str(ROOT / 'P2PGuard/App/GuardPolicy.swift'),
+                            str(ROOT / 'Tests/test_app_policy.swift'), '-o', str(exe)], check=True)
+            subprocess.run([str(exe)], check=True, cwd=temp)
+
     def test_web_and_metadata_pass_but_peer_file_messages_block(self):
         folder = ROOT / 'P2PGuard/Filter'
         with tempfile.TemporaryDirectory() as temp:
