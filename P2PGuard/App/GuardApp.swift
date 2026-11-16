@@ -5,24 +5,50 @@ import UniformTypeIdentifiers
 
 @main struct GuardApp: App {
     static let support = URL(string: "https://github.com/widmonstertony/thunder-guard/issues")!
+    static let privacy = URL(string: "https://github.com/widmonstertony/thunder-guard/blob/main/P2PGuard/Store/PRIVACY.md")!
     @StateObject private var control = FilterControl()
+    @StateObject private var activity = Activity()
+    @StateObject private var meter = NetworkMeter()
+    @AppStorage("showNetworkMenu") private var showNetworkMenu = true
+    @NSApplicationDelegateAdaptor(DockPresence.self) private var dock
 
     var body: some Scene {
-        WindowGroup("TonTon P2PGuard") {
-            GuardDashboard(control: control)
+        Window("TonTon P2PGuard", id: "dashboard") {
+            GuardDashboard(control: control, activity: activity)
                 .frame(minWidth: 960, minHeight: 610)
+                .background(DockWindowAnchor(dock: dock))
         }
         .defaultSize(width: 1220, height: 740)
         .windowStyle(.titleBar)
         .commands {
-            CommandGroup(replacing: .help) { Link("GitHub 支持与问题反馈", destination: Self.support) }
+            CommandGroup(replacing: .help) {
+                Link("GitHub 支持与问题反馈", destination: Self.support)
+#if PG_STORE
+                Link("隐私政策", destination: Self.privacy)
+#endif
+            }
+        }
+        MenuBarExtra(isInserted: $showNetworkMenu) {
+            NetworkMenu(meter: meter, activity: activity, control: control, dock: dock)
+        } label: {
+            NetworkMenuLabel(meter: meter, activity: activity)
+        }.menuBarExtraStyle(.window)
+        Settings {
+            Form {
+                Toggle("在菜单栏显示下载和上传速度", isOn: $showNetworkMenu)
+#if PG_STORE
+                Link("隐私政策", destination: Self.privacy)
+#endif
+            }.padding(20).frame(width: 400)
+                .background(DockWindowAnchor(dock: dock))
+                .onChange(of: showNetworkMenu) { _, _ in dock.update() }
         }
     }
 }
 
 private enum Selection: Hashable { case all, app(String) }
 private enum ViewMode: String, CaseIterable { case connections = "连接", blocked = "拦截" }
-private enum VerdictKind: String, CaseIterable {
+enum VerdictKind: String, CaseIterable {
     case upload = "BT 上传", download = "BT 下载", other = "其他拒绝"
     var symbol: String {
         switch self { case .upload: "arrow.up"; case .download: "arrow.down"; case .other: "hand.raised" }
@@ -50,7 +76,7 @@ private struct DisplayedConnection {
 
 private struct GuardDashboard: View {
     @ObservedObject var control: FilterControl
-    @StateObject private var activity = Activity()
+    @ObservedObject var activity: Activity
     @State private var selection: Selection? = .all
     @State private var mode: ViewMode = .connections
     @State private var search = ""
@@ -240,12 +266,10 @@ private struct GuardDashboard: View {
                 activity.start()
                 while !Task.isCancelled {
                     await control.load()
-                    await activity.sample()
-                    recordSample()
                     try? await Task.sleep(for: .seconds(3))
                 }
             }
-            .onDisappear { activity.stop() }
+            .onReceive(activity.$processes) { recordSample(from: $0) }
             .onChange(of: selection) { _, _ in
                 showPolicy = false; region = nil; verdictKind = nil
                 history = []; previous = [:]; recordSample()
@@ -259,8 +283,9 @@ private struct GuardDashboard: View {
         HStack(alignment: .center) {
             VStack(alignment: .leading, spacing: 4) {
                 Text(title).font(.title2.bold())
-                Text(selectedApp?.appID == GuardPolicy.thunderID && control.policy.thunderIP
-                     ? "已配置 IP 位址规则" : "查看网络连接和实际拦截")
+                Text(selectedApp?.appID == GuardPolicy.thunderID
+                     ? (control.policy.thunderIP ? (control.configured ? "IP 位址规则已开启" : "IP 位址规则未生效：过滤器未启用") : "IP 位址规则未开启")
+                     : "查看网络连接和实际拦截")
                     .font(.callout).foregroundStyle(.secondary)
             }
             Spacer()
@@ -299,13 +324,24 @@ private struct GuardDashboard: View {
                 ForEach(ViewMode.allCases, id: \.self) { Text($0.rawValue).tag($0) }
             }.pickerStyle(.segmented).labelsHidden()
             if mode == .blocked {
-                HStack(spacing: 6) {
-                    ForEach(VerdictKind.allCases, id: \.self) { kind in
-                        verdictCount(kind, events.filter(kind.includes).count)
+                if activity.blockFeedAvailable {
+                    HStack(spacing: 6) {
+                        ForEach(VerdictKind.allCases, id: \.self) { kind in
+                            verdictCount(kind, events.filter(kind.includes).count)
+                        }
                     }
+                    eventList(events.filter { verdictKind?.includes($0) != false })
+                    Text("近 10 分钟 · 只显示本版护栏的拦截").font(.caption2).foregroundStyle(.secondary)
+                } else {
+                    ContentUnavailableView("尚未收到拦截记录", systemImage: "shield.slash",
+                                           description: Text("记录来源未连接，无法判断拦截次数。"))
                 }
-                eventList(events.filter { verdictKind?.includes($0) != false })
-                Text("近 10 分钟 · 最多 250 条护栏记录").font(.caption2).foregroundStyle(.secondary)
+#if PG_STORE
+                if activity.legacyDashboardRunning {
+                    Text("旧版护栏也在运行。旧版先拒绝的连接不会出现在这里。")
+                        .font(.caption2).foregroundStyle(.secondary)
+                }
+#endif
             } else {
                 connectionList
                 Text("可见连接不代表护栏已放行。").font(.caption2).foregroundStyle(.secondary)
@@ -331,6 +367,14 @@ private struct GuardDashboard: View {
     }
     private var policies: some View {
         VStack(alignment: .leading, spacing: 12) {
+#if PG_STORE
+            Toggle("观察连接和 App 流量", isOn: Binding(get: { control.observing }, set: {
+                control.change(to: control.policy, observe: $0)
+            })).toggleStyle(.switch).disabled(control.busy)
+            Text("开启后，扩展在本机提供连接统计。关闭后，已选择的拦截规则仍然有效。")
+                .font(.caption).foregroundStyle(.secondary)
+            Divider()
+#endif
             if selectedApp?.appID == GuardPolicy.thunderID {
                 Toggle("IP 位址 · 直连仅允许获取清单", isOn: Binding(get: { control.policy.thunderIP },
                     set: { value in
@@ -423,10 +467,14 @@ private struct GuardDashboard: View {
         }.frame(maxWidth: .infinity, maxHeight: .infinity)
     }
     private func bytes(_ count: Int64) -> String { ByteCountFormatter.string(fromByteCount: count, countStyle: .file) }
-    private func recordSample() {
+    private func recordSample(from latest: [NetworkProcess]? = nil) {
         var next: [Int32: Totals] = [:]
         var delta = Totals()
-        for process in processes {
+        let selectedProcesses = latest.map { values in
+            if case .app(let id) = selection { return values.filter { $0.groupID == id } }
+            return values
+        } ?? processes
+        for process in selectedProcesses {
             let totals = process.connections.reduce(into: Totals()) { $0.received += $1.received; $0.sent += $1.sent }
             next[process.id] = totals
             if let old = previous[process.id] {

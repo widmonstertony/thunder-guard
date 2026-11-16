@@ -3,6 +3,8 @@ Research/
 Verification.txt
 README.txt
 **/__pycache__/
+P2PGuard/Store/Generated/
+P2PGuard/Store/TonTonP2PGuardStore.xcodeproj/
 *.pyc
 .DS_Store
 *.dmg

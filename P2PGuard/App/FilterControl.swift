@@ -3,13 +3,16 @@ import NetworkExtension
 import SystemExtensions
 
 @MainActor final class FilterControl: NSObject, ObservableObject, OSSystemExtensionRequestDelegate {
-    static let identifier = "org.thunderguard.firewall.extension"
+    static let identifier = Bundle.main.object(forInfoDictionaryKey: "PGFilterIdentifier") as? String
+        ?? "org.thunderguard.firewall.extension"
     @Published private(set) var policy = GuardPolicy()
     @Published private(set) var configured = false
     @Published private(set) var busy = false
     @Published private(set) var note: String?
     private let manager = NEFilterManager.shared()
     private var pending: GuardPolicy?
+    private var pendingObservation = false
+    @Published private(set) var observing = false
 
     func load() async {
         guard !busy else { return }
@@ -27,14 +30,18 @@ import SystemExtensions
         let saved = GuardPolicy(vendorConfiguration: ownsConfig ? config?.vendorConfiguration ?? [:] : [:])
         if configured != active { configured = active }
         if policy != saved { policy = saved }
+        if observing != (active && config?.vendorConfiguration?["observeLocalFlows"] as? Bool == true) {
+            observing = active && config?.vendorConfiguration?["observeLocalFlows"] as? Bool == true
+        }
     }
 
-    func change(to policy: GuardPolicy) {
+    func change(to policy: GuardPolicy, observe: Bool? = nil) {
         guard !busy else { return }
         note = nil
         busy = true
         pending = policy
-        if policy.needsFilter {
+        pendingObservation = observe ?? observing
+        if policy.needsFilter || pendingObservation {
             let request = OSSystemExtensionRequest.activationRequest(forExtensionWithIdentifier: Self.identifier, queue: .main)
             request.delegate = self
             OSSystemExtensionManager.shared.submitRequest(request)
@@ -55,10 +62,14 @@ import SystemExtensions
             config.filterSockets = true
             config.filterPackets = false
             config.filterDataProviderBundleIdentifier = Self.identifier
-            config.vendorConfiguration = policy.vendorConfiguration
+            var fields = policy.vendorConfiguration
+#if PG_STORE
+            fields["observeLocalFlows"] = pendingObservation
+#endif
+            config.vendorConfiguration = fields
             manager.providerConfiguration = config
             manager.localizedDescription = "TonTon P2PGuard"
-            manager.isEnabled = manager.isEnabled || policy.needsFilter
+            manager.isEnabled = manager.isEnabled || policy.needsFilter || pendingObservation
             try await manager.saveToPreferences()
             try await manager.loadFromPreferences()
             readPreferences()

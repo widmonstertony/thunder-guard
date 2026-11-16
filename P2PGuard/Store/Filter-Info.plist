@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+<key>CFBundleDevelopmentRegion</key><string>zh_CN</string>
+<key>CFBundleDisplayName</key><string>TonTon P2PGuard 网络过滤器</string>
+<key>CFBundleName</key><string>TonTon P2PGuard 网络过滤器</string>
+<key>CFBundleIdentifier</key><string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
+<key>CFBundleExecutable</key><string>$(EXECUTABLE_NAME)</string>
+<key>CFBundlePackageType</key><string>SYSX</string>
+<key>CFBundleVersion</key><string>$(CURRENT_PROJECT_VERSION)</string>
+<key>CFBundleShortVersionString</key><string>$(MARKETING_VERSION)</string>
+<key>NSSystemExtensionUsageDescription</key><string>在本机观察连接，并执行你选择的 BitTorrent 拦截规则。</string>
+<key>PGClientIdentifier</key><string>$(PG_APP_ID)</string>
+<key>PGSigningTeam</key><string>$(DEVELOPMENT_TEAM)</string>
+<key>NetworkExtension</key><dict>
+  <key>NEMachServiceName</key><string>$(PG_FEED_SERVICE)</string>
+  <key>NEProviderClasses</key><dict><key>com.apple.networkextension.filter-data</key><string>PGFilterProvider</string></dict>
+</dict>
+</dict></plist>

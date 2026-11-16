@@ -27,6 +27,12 @@ struct MonitoredApp: Identifiable {
     var connectionCount: Int { processes.reduce(0) { $0 + $1.connections.count } }
 }
 
+struct AppTraffic: Identifiable {
+    let id: String
+    let name: String
+    var rate: Traffic
+}
+
 struct BlockEvent: Identifiable, Decodable {
     var id: String { "\(timestamp)-\(process)-\(address)-\(port)-\(direction.rawValue)" }
     let app: String
@@ -72,8 +78,16 @@ struct BlockEvent: Identifiable, Decodable {
     @Published private(set) var runningApps: [MonitoredApp] = []
     @Published private(set) var events: [BlockEvent] = []
     @Published private(set) var status: String?
+    @Published private(set) var topTraffic: [AppTraffic] = []
+    @Published private(set) var blockFeedAvailable = false
+#if PG_STORE
+    @Published private(set) var legacyDashboardRunning = false
+#endif
     private var sampling = false
     private var reader: Task<Void, Never>?
+    private var sampler: Task<Void, Never>?
+    private var lastSample: TimeInterval?
+    private var lastCounts: [String: Traffic] = [:]
 
     func sample() async {
         guard !sampling else { return }
@@ -84,13 +98,28 @@ struct BlockEvent: Identifiable, Decodable {
             guard app.activationPolicy == .regular, let id = app.bundleIdentifier else { return nil }
             return MonitoredApp(id: "app:" + id, name: app.localizedName ?? id, appID: id, icon: app.icon)
         }
+#if PG_STORE
+        let legacyRunning = observed.contains { $0.bundleIdentifier == "org.thunderguard.firewall.app" }
+        if legacyDashboardRunning != legacyRunning { legacyDashboardRunning = legacyRunning }
+        guard let update = await StoreFeed.read() else {
+            blockFeedAvailable = false
+            status = "尚未收到商店版扩展的连接数据。"; topTraffic = []; lastCounts = [:]; processes = []; events = []
+            return
+        }
+        let updated = update.processes
+        updateTraffic(updated)
+        processes = updated
+        events = update.blocks
+        blockFeedAvailable = true
+        status = nil
+#else
         do {
             let snapshot = try await Task.detached(priority: .utility) { try Self.networkSnapshot() }.value
             let ids = observed.reduce(into: [Int32: String]()) { result, app in
                 result[app.processIdentifier] = app.bundleIdentifier
             }
             let thunderRunning = observed.contains { $0.bundleIdentifier == GuardPolicy.thunderID }
-            processes = snapshot.map { process in
+            let updated = snapshot.map { process in
                 var process = process
                 process.appID = ids[process.id]
                 if process.appID == nil, thunderRunning,
@@ -99,23 +128,60 @@ struct BlockEvent: Identifiable, Decodable {
                 }
                 return process
             }
+            updateTraffic(updated)
+            processes = updated
             status = nil
-        } catch { status = "暂时无法读取系统连接。" }
+        } catch { status = "暂时无法读取系统连接。"; topTraffic = []; lastCounts = [:] }
+#endif
     }
 
     func start() {
+        if sampler == nil {
+            sampler = Task { [weak self] in
+                while !Task.isCancelled {
+                    await self?.sample()
+                    try? await Task.sleep(for: .seconds(2))
+                }
+            }
+        }
+#if !PG_STORE
         guard reader == nil else { return }
         reader = Task { [weak self] in
             while !Task.isCancelled {
                 let evidence = await Task.detached(priority: .utility) { Self.readEvidence() }.value
                 if let evidence { self?.events = evidence }
+                self?.blockFeedAvailable = evidence != nil
                 try? await Task.sleep(for: .seconds(5))
             }
         }
+#endif
     }
 
-    func stop() { reader?.cancel(); reader = nil }
+    private func updateTraffic(_ snapshot: [NetworkProcess]) {
+        let now = ProcessInfo.processInfo.systemUptime
+        let elapsed = lastSample.map { now - $0 } ?? 0
+        lastSample = now
+        let names = runningApps.reduce(into: [String: String]()) { $0[$1.id] = $1.name }
+        var fresh: [String: Traffic] = [:]
+        var groups: [String: AppTraffic] = [:]
+        for process in snapshot {
+            for flow in process.connections {
+                let key = "\(process.id):\(process.groupID):\(flow.id)"
+                let value = Traffic(down: Double(flow.received), up: Double(flow.sent))
+                fresh[key] = value
+                guard (0.2...15).contains(elapsed), let old = lastCounts[key] else { continue }
+                let rate = Traffic.delta(now: value, previous: old).perSecond(elapsed)
+                guard rate.total > 0 else { continue }
+                let id = process.groupID
+                groups[id, default: .init(id: id, name: names[id] ?? process.name, rate: Traffic())].rate =
+                    (groups[id]?.rate ?? .init()) + rate
+            }
+        }
+        lastCounts = fresh
+        topTraffic = groups.values.sorted { $0.rate.total > $1.rate.total }.prefix(8).map { $0 }
+    }
 
+#if !PG_STORE
     private nonisolated static func run(_ command: String, _ arguments: [String]) throws -> String {
         let process = Process()
         let output = Pipe()
@@ -134,11 +200,19 @@ struct BlockEvent: Identifiable, Decodable {
         guard let log = try? run("/usr/bin/log", ["show", "--last", "10m", "--style", "compact", "--predicate",
             #"subsystem == "org.thunderguard.firewall" AND category == "packet-evidence" AND eventMessage BEGINSWITH "P2PGUARD_BLOCK ""#])
         else { return nil }
-        return log.split(separator: "\n").lazy.filter { $0.contains("P2PGUARD_BLOCK ") }
-            .suffix(250).reversed().compactMap { line in
-            guard let tag = line.range(of: "P2PGUARD_BLOCK ") else { return nil }
-            return try? JSONDecoder().decode(BlockEvent.self, from: Data(line[tag.upperBound...].utf8))
+        let decoder = JSONDecoder()
+        var counts: [VerdictKind: Int] = [:]
+        var retained: [BlockEvent] = []
+        for line in log.split(separator: "\n").reversed() {
+            guard let tag = line.range(of: "P2PGUARD_BLOCK "),
+                  let event = try? decoder.decode(BlockEvent.self, from: Data(line[tag.upperBound...].utf8)) else { continue }
+            let kind: VerdictKind = event.isFile ? (event.direction == .upload ? .upload : .download) : .other
+            guard counts[kind, default: 0] < 250 else { continue }
+            counts[kind, default: 0] += 1
+            retained.append(event)
+            if retained.count == 750 { break }
         }
+        return retained
     }
 
     private nonisolated static func networkSnapshot() throws -> [NetworkProcess] {
@@ -160,4 +234,5 @@ struct BlockEvent: Identifiable, Decodable {
         }
         return groups.filter { !$0.connections.isEmpty }.sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
     }
+#endif
 }

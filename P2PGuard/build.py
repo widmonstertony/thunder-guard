@@ -25,7 +25,7 @@ def bundle(path, name, title, identifier, kind, extra):
         'CFBundleDevelopmentRegion': 'zh_CN', 'CFBundleDisplayName': title,
         'CFBundleName': title, 'CFBundleExecutable': name, 'CFBundleIdentifier': identifier,
         'CFBundleInfoDictionaryVersion': '6.0', 'CFBundlePackageType': kind,
-        'CFBundleVersion': '17', 'CFBundleShortVersionString': '0.6.4',
+        'CFBundleVersion': '26', 'CFBundleShortVersionString': '0.7.0',
         'LSMinimumSystemVersion': '14.0', **extra,
     })
     return path / 'Contents/MacOS' / name

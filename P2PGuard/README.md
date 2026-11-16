@@ -1,8 +1,10 @@
-# TonTon P2PGuard · 0.6.4
+# TonTon P2PGuard · 0.7.0
 
 Native macOS monitor and content filter. The host uses SwiftUI and the embedded extension uses Apple's Network Extension API. This target builds with no LuLu source, resources, rules, helper, or login item. The old product and its upstream attribution are preserved in the repository as historical source.
 
 The dashboard starts on **All Apps**. It shows visible connections and denials for the selected app, and can watch an installed app before it is running.
+
+The menu bar shows upload and download speeds. Its popover shows network statistics and recent denials by app; the three denial counters also filter the displayed records. The last ten minutes of BT upload, BT download and other denials each have a separate limit, so IP denials cannot displace BT records.
 
 - **BT files** is an opt-in rule for all apps or an individual app. An app can inherit the global setting, block BT files even when the global setting is off, or be exempt from the global rule. The scope is recognized file request and piece messages on plaintext BitTorrent TCP streams. BitTorrent metadata, ordinary HTTP/TLS, and unrecognized protocols pass. This setting does not detect encrypted BitTorrent, uTP or proprietary peer protocols. Apps whose identity cannot be confirmed can inherit the global setting but have no individual rule.
 - Thunder's optional **IP addresses** rule remains separate in its settings. It uses system hostname information, HTTP Host, TLS SNI and Xunlei CDN handling to preserve named services. On unnamed connections it permits supported plaintext BitTorrent metadata and DHT discovery, and rejects file messages or unsupported direct-to-IP traffic. Existing Thunder rules are migrated without turning on global blocking.
@@ -41,4 +43,4 @@ A successful build or notarization is not runtime acceptance.
 
 ## Mac App Store
 
-Apple supports macOS [content filters packaged as system extensions](https://developer.apple.com/documentation/technotes/tn3134-network-extension-provider-deployment) through the Mac App Store. This Developer ID build is for direct distribution. A Store target needs App Store signing, App Sandbox and the standard [content-filter-provider entitlement](https://developer.apple.com/documentation/bundleresources/entitlements/com.apple.developer.networking.networkextension) in the corresponding profiles. It also needs to verify or replace the current `nettop` and unified log readers under sandboxing, validate the identifiers and app group, review distribution rights for the code and bundled data, complete the privacy disclosures, and pass App Review. No Store archive or submission has been produced.
+The [Mac App Store target](Store/README.md) uses a sandboxed host and an authenticated local feed from its embedded filter. The Developer ID build described above is for direct distribution and uses the local system log to read its own denials. Both share the filtering engine and UI.

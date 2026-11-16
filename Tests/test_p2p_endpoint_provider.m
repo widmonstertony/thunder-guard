@@ -29,12 +29,20 @@
 @property NEFilterProviderConfiguration *config;
 @property NSString *processPath;
 @property NSString *app;
+@property NSString *lastReason;
+@property NSUInteger verdictCount;
 @end
 @implementation FixtureProvider
 - (NEFilterProviderConfiguration *)filterConfiguration { return self.config; }
 - (NSString *)thunderPath:(NSData *)token { return self.processPath; }
 - (NSString *)applicationID:(NSData *)token { return self.app; }
 - (NSSet<NSString *> *)addressesForName:(NSString *)name { return [NSSet setWithObject:@"192.0.2.80"]; }
+- (void)logFlow:(NEFilterFlow *)flow session:(PGSession *)session direction:(NSString *)direction
+         reason:(NSString *)reason detail:(NSString *)detail {
+    self.lastReason = reason;
+    self.verdictCount++;
+    [super logFlow:flow session:session direction:direction reason:reason detail:detail];
+}
 @end
 
 static NEFilterSocketFlow *flow(NSString *address, NSString *port, NSString *name) {
@@ -201,12 +209,29 @@ int main(void) {
             same(step(guard, peer, rx, 68, both),
                  [NEFilterDataVerdict dataVerdictWithPassBytes:metadata.length peekBytes:5]);
             same(step(guard, peer, rx, 68 + metadata.length, piece), [NEFilterDataVerdict dropVerdict]);
-            assert([guard.sessions[peer.identifier].appID isEqualToString:guard.app]);
+            assert(guard.sessions[peer.identifier] == nil);
+            const NSUInteger count = guard.verdictCount;
+            same(step(guard, peer, !rx, 0, hello), [NEFilterDataVerdict dropVerdict]);
+            assert(guard.verdictCount == count); // One verdict per dropped flow.
         }
 
         guard.app = nil; // system sockets without a stable app ID still inherit global.
         same([guard handleNewFlow:flow(@"192.0.2.35", @"40000", nil)], inspectBoth);
         guard.app = @"org.thunderguard.firewall.app";
         same([guard handleNewFlow:flow(@"192.0.2.35", @"40000", nil)], [NEFilterNewFlowVerdict allowVerdict]);
+
+        // A busy direct-IP rule must not let newly protected BT flows through.
+        guard.app = @"org.example.PeerClient";
+        guard.config.vendorConfiguration = @{@"appBTOverrides": @{guard.app: @"block"}};
+        [guard.sessions removeAllObjects];
+        PGSession *busy = [PGSession new];
+        busy.touched = NSProcessInfo.processInfo.systemUptime;
+        for (NSUInteger i = 0; i < 4096; ++i) guard.sessions[NSUUID.UUID] = busy;
+        same([guard handleNewFlow:flow(@"192.0.2.35", @"40000", nil)], inspectBoth);
+        while (guard.sessions.count < sessionLimit) guard.sessions[NSUUID.UUID] = busy;
+        same([guard handleNewFlow:flow(@"192.0.2.35", @"40000", nil)], [NEFilterNewFlowVerdict dropVerdict]);
+        assert([guard.lastReason isEqualToString:@"inspection-capacity"]);
+        guard.app = @"org.example.Unrelated";
+        same([guard handleNewFlow:flow(@"192.0.2.35", @"443", @"www.example.org")], [NEFilterNewFlowVerdict allowVerdict]);
     }
 }

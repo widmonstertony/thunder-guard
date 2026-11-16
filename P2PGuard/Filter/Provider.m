@@ -12,11 +12,38 @@
 #import "PeerClassifier.h"
 #import "PeekWindow.h"
 #import "../../Integration/ThunderPeerWire.h"
+#if PG_STORE
+#import "../Store/StoreFeed.h"
+
+static NSData *userToken(NEFilterFlow *flow) {
+    return flow.sourceProcessAuditToken.length == sizeof(audit_token_t) ? flow.sourceProcessAuditToken : flow.sourceAppAuditToken;
+}
+
+static uid_t flowUser(NEFilterFlow *flow) {
+    for (NSData *data in @[flow.sourceProcessAuditToken ?: NSData.data, flow.sourceAppAuditToken ?: NSData.data]) {
+        audit_token_t token;
+        if (data.length != sizeof token) continue;
+        [data getBytes:&token length:sizeof token];
+        uid_t uid = audit_token_to_euid(token);
+        if (uid >= 501 && uid != (uid_t)-1) return uid;
+    }
+    return (uid_t)-1;
+}
+
+static int processID(NEFilterFlow *flow) {
+    NSData *data = userToken(flow);
+    audit_token_t token;
+    if (data.length != sizeof token) return 0;
+    [data getBytes:&token length:sizeof token];
+    return audit_token_to_pid(token);
+}
+#endif
 
 static os_log_t auditLog;
 static NSString *const appPrefix = @"/Thunder.app/Contents/";
 static NSString *const thunderID = @"com.xunlei.Thunder";
 static NSString *const guardPrefix = @"org.thunderguard.firewall.";
+static const NSUInteger sessionLimit = 8192;
 typedef NS_ENUM(NSUInteger, PGMode) { PGModeEndpoint, PGModeWeb, PGModePeer, PGModeDHT, PGModeBT, PGModeDone };
 
 @interface PGSession : NSObject {
@@ -33,6 +60,10 @@ typedef NS_ENUM(NSUInteger, PGMode) { PGModeEndpoint, PGModeWeb, PGModePeer, PGM
 @property PGMode mode;
 @property BOOL broadBT;
 @property BOOL preserveByAddress;
+@property BOOL rejected;
+#if PG_STORE
+@property uid_t reportingUser;
+#endif
 @end
 @implementation PGSession
 - (instancetype)init {
@@ -142,7 +173,12 @@ static NEFilterSettings *settingsForSockets(void) {
     }];
 }
 
-- (void)stopFilterWithReason:(NEProviderStopReason)reason completionHandler:(void (^)(void))done { done(); }
+- (void)stopFilterWithReason:(NEProviderStopReason)reason completionHandler:(void (^)(void))done {
+#if PG_STORE
+    [[PGStoreFeedServer shared] reset];
+#endif
+    done();
+}
 
 - (NSString *)applicationID:(NSData *)token {
     if (token.length != sizeof(audit_token_t)) return nil;
@@ -243,6 +279,19 @@ static NEFilterSettings *settingsForSockets(void) {
     return result;
 }
 
+- (NEFilterNewFlowVerdict *)pass:(NEFilterFlow *)flow {
+    NEFilterNewFlowVerdict *verdict = [NEFilterNewFlowVerdict allowVerdict];
+#if PG_STORE
+    if ([flow isKindOfClass:NEFilterSocketFlow.class] &&
+        ([(NEFilterSocketFlow *)flow socketProtocol] == IPPROTO_TCP || [(NEFilterSocketFlow *)flow socketProtocol] == IPPROTO_UDP) &&
+        [self.filterConfiguration.vendorConfiguration[@"observeLocalFlows"] isEqual:@YES]) {
+        verdict.shouldReport = YES;
+        verdict.statisticsReportFrequency = NEFilterReportFrequencyLow;
+    }
+#endif
+    return verdict;
+}
+
 - (NEFilterNewFlowVerdict *)handleNewFlow:(NEFilterFlow *)flow {
     if (![flow isKindOfClass:NEFilterSocketFlow.class]) return [NEFilterNewFlowVerdict allowVerdict];
     NSDictionary *policy = self.filterConfiguration.vendorConfiguration;
@@ -250,7 +299,7 @@ static NEFilterSettings *settingsForSockets(void) {
     BOOL legacyIP = [policy[@"blockThunderIP"] isEqual:@YES];
     BOOL globalBT = [policy[@"blockAllBT"] isEqual:@YES];
     NSDictionary *overrides = [policy[@"appBTOverrides"] isKindOfClass:NSDictionary.class] ? policy[@"appBTOverrides"] : nil;
-    if (!legacyBT && !legacyIP && !globalBT && !overrides.count) return [NEFilterNewFlowVerdict allowVerdict];
+    if (!legacyBT && !legacyIP && !globalBT && !overrides.count) return [self pass:flow];
     NEFilterSocketFlow *socket = (NEFilterSocketFlow *)flow;
     BOOL tcp = socket.socketProtocol == IPPROTO_TCP && socket.socketType == SOCK_STREAM;
     BOOL udp = socket.socketProtocol == IPPROTO_UDP && socket.socketType == SOCK_DGRAM;
@@ -261,7 +310,7 @@ static NEFilterSettings *settingsForSockets(void) {
     NSString *override = app ? overrides[app] : nil;
     BOOL blockBT = [override isEqual:@"block"] || (![override isEqual:@"allow"] && (globalBT || (p && legacyBT)));
     BOOL blockIP = p != nil && legacyIP;
-    if (!blockIP && (!blockBT || !tcp)) return [NEFilterNewFlowVerdict allowVerdict];
+    if (!blockIP && (!blockBT || !tcp)) return [self pass:flow];
     NSString *host, *port;
     endpointFor(socket, &host, &port);
     // Prefer system-supplied names. The endpoint's numerical address alone
@@ -270,7 +319,7 @@ static NEFilterSettings *settingsForSockets(void) {
     p = p ?: [self processName:flow.sourceProcessAuditToken] ?: app ?: @"未知进程";
     [self noteObservation:p host:host named:[self hasName:socket endpoint:host] tcp:tcp blockIP:blockIP blockBT:blockBT];
     BOOL inspectIP = blockIP && !named;
-    if (!inspectIP && (!blockBT || !tcp)) return [NEFilterNewFlowVerdict allowVerdict];
+    if (!inspectIP && (!blockBT || !tcp)) return [self pass:flow];
     PGSession *session = [PGSession new];
     session.path = p;
     session.appID = app;
@@ -278,6 +327,9 @@ static NEFilterSettings *settingsForSockets(void) {
     session.broadBT = blockBT;
     session.mode = inspectIP ? [self modeFor:socket host:host port:port] : PGModeBT;
     session.touched = NSProcessInfo.processInfo.systemUptime;
+#if PG_STORE
+    session.reportingUser = flowUser(flow);
+#endif
     @synchronized (self.sessions) {
         if (session.touched >= self.nextReap) {
             self.nextReap = session.touched + 30;
@@ -287,9 +339,9 @@ static NEFilterSettings *settingsForSockets(void) {
                     [self.sessions removeObjectForKey:key];
             }
         }
-        if (!inspectIP && self.sessions.count >= 4096) return [NEFilterNewFlowVerdict allowVerdict];
-        if (self.sessions.count >= 8192) {
-            if (!inspectIP) return [NEFilterNewFlowVerdict allowVerdict];
+        if (self.sessions.count >= sessionLimit) {
+            // Unprotected apps already passed above. Never silently bypass
+            // either opted-in rule when there is no room left to inspect.
             [self logFlow:flow session:session direction:@"connection" reason:@"inspection-capacity"];
             return [NEFilterNewFlowVerdict dropVerdict];
         }
@@ -300,10 +352,38 @@ static NEFilterSettings *settingsForSockets(void) {
     // Generic inspection tracks ordinary sockets until the flow closes;
     // reaping an idle socket can disrupt an unrelated, still-live protocol.
     if (!inspectIP) verdict.shouldReport = YES;
+#if PG_STORE
+    if ([policy[@"observeLocalFlows"] isEqual:@YES]) {
+        verdict.shouldReport = YES;
+        verdict.statisticsReportFrequency = NEFilterReportFrequencyLow;
+    }
+#endif
     return verdict;
 }
 
 - (void)handleReport:(NEFilterReport *)report {
+#if PG_STORE
+    NEFilterFlow *flow = report.flow;
+    if ([self.filterConfiguration.vendorConfiguration[@"observeLocalFlows"] isEqual:@YES] &&
+        (report.event == NEFilterReportEventFlowClosed || report.event == NEFilterReportEventStatistics) &&
+        [flow isKindOfClass:NEFilterSocketFlow.class] && flow.identifier) {
+        uid_t user = flowUser(flow);
+        if (user >= 501 && user != (uid_t)-1) {
+            NSString *host, *port;
+            endpointFor((NEFilterSocketFlow *)flow, &host, &port);
+            NSString *address = normalizedAddress(host);
+            if (address.length && port.length) {
+                NSString *p = [self thunderPath:flow.sourceProcessAuditToken] ?: [self thunderPath:flow.sourceAppAuditToken];
+                NSString *app = p ? thunderID : ([self applicationID:flow.sourceAppAuditToken] ?: [self applicationID:flow.sourceProcessAuditToken]);
+                NSString *name = p.lastPathComponent ?: [self processName:flow.sourceProcessAuditToken] ?: app ?: @"未知进程";
+                [[PGStoreFeedServer shared] recordFlow:flow.identifier forUser:user fields:@{
+                    @"id": flow.identifier.UUIDString, @"pid": @(processID(flow)), @"app": app ?: @"", @"name": name,
+                    @"host": address, @"port": port, @"proto": [(NEFilterSocketFlow *)flow socketProtocol] == IPPROTO_TCP ? @"TCP" : @"UDP",
+                    @"received": @(report.bytesInboundCount), @"sent": @(report.bytesOutboundCount)}];
+            }
+        }
+    }
+#endif
     if (report.event == NEFilterReportEventFlowClosed && report.flow.identifier) {
         @synchronized (self.sessions) { [self.sessions removeObjectForKey:report.flow.identifier]; }
     }
@@ -326,8 +406,9 @@ static NEFilterSettings *settingsForSockets(void) {
                 blockIP:(BOOL)blockIP blockBT:(BOOL)blockBT {
     if (![self takeEvidenceSlot]) return;
     // No destination, URL or payload in routine diagnostics.
-    os_log(auditLog, "P2PGUARD_FLOW build=17 process=%{public}@ endpoint=%{public}s transport=%{public}s ip=%d bt=%d",
-           path.lastPathComponent, named ? "named" : host.length ? "address" : "pending",
+    os_log(auditLog, "P2PGUARD_FLOW build=%{public}@ process=%{public}@ endpoint=%{public}s transport=%{public}s ip=%d bt=%d",
+           [NSBundle.mainBundle objectForInfoDictionaryKey:@"CFBundleVersion"], path.lastPathComponent,
+           named ? "named" : host.length ? "address" : "pending",
            tcp ? "tcp" : "udp", blockIP, blockBT);
 }
 
@@ -349,11 +430,34 @@ static NEFilterSettings *settingsForSockets(void) {
          reason:(NSString *)reason detail:(NSString *)detail {
     NSString *host, *port;
     endpointFor((NEFilterSocketFlow *)flow, &host, &port);
-    NSDictionary *event = @{@"app": session.appID ?: @"", @"process": session.path.lastPathComponent,
-        @"address": host ?: @"", @"port": port ?: @"",
+    NSDictionary *event = @{@"app": session.appID ?: @"", @"process": session.path.lastPathComponent ?: @"",
+        @"address":
+#if PG_STORE
+        normalizedAddress(host) ?: @"",
+#else
+        host ?: @"",
+#endif
+        @"port": port ?: @"",
         @"direction": direction, @"reason": reason, @"detail": detail ?: @"", @"timestamp": @(NSDate.date.timeIntervalSince1970)};
+#if PG_STORE
+    const uid_t uid = session.reportingUser != (uid_t)-1 ? session.reportingUser : flowUser(flow);
+    [[PGStoreFeedServer shared] recordBlock:event forUser:uid];
+    os_log_debug(auditLog, "P2PGUARD_STORE_DENY reason=%{public}@ direction=%{public}@ visible=%d",
+                 reason, direction, uid != (uid_t)-1);
+#else
     NSData *data = [NSJSONSerialization dataWithJSONObject:event options:0 error:NULL];
     if (data) os_log(auditLog, "P2PGUARD_BLOCK %{public}@", [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding]);
+#endif
+}
+
+- (NEFilterDataVerdict *)rejectFlow:(NEFilterFlow *)flow session:(PGSession *)session direction:(NSString *)direction
+                            reason:(NSString *)reason detail:(NSString *)detail {
+    session.rejected = YES;
+    @synchronized (self.sessions) {
+        if (self.sessions[flow.identifier] == session) [self.sessions removeObjectForKey:flow.identifier];
+    }
+    [self logFlow:flow session:session direction:direction reason:reason detail:detail];
+    return [NEFilterDataVerdict dropVerdict];
 }
 
 - (NEFilterDataVerdict *)inspectAddress:(NEFilterSocketFlow *)flow session:(PGSession *)session data:(NSData *)data final:(BOOL)final {
@@ -382,8 +486,7 @@ static NEFilterSettings *settingsForSockets(void) {
     }
     session.mode = PGModeDone;
     if (named) return [NEFilterDataVerdict allowVerdict];
-    [self logFlow:flow session:session direction:@"connection" reason:@"direct-ip"];
-    return [NEFilterDataVerdict dropVerdict];
+    return [self rejectFlow:flow session:session direction:@"connection" reason:@"direct-ip" detail:nil];
 }
 
 - (NEFilterDataVerdict *)inspectPeer:(NEFilterSocketFlow *)flow session:(PGSession *)session
@@ -412,8 +515,7 @@ static NEFilterSettings *settingsForSockets(void) {
     } else {
         PGPeekWindow *window = session->windows[incoming];
         if (![window receive:data at:offset limit:2 * TG_MAX_FRAME]) {
-            [self logFlow:flow session:session direction:@"connection" reason:@"inspection-offset" detail:@"Incomplete stream"];
-            return [NEFilterDataVerdict dropVerdict];
+            return [self rejectFlow:flow session:session direction:@"connection" reason:@"inspection-offset" detail:@"Incomplete stream"];
         }
         const NSUInteger previous = window.base;
         while (window.bytes.length) {
@@ -431,22 +533,17 @@ static NEFilterSettings *settingsForSockets(void) {
             if (decision.action == TGDropFile) {
                 BOOL upload = bytes[4] == 7 ? !incoming : incoming;
                 NSString *detail = bytes[4] == 7 ? @"piece" : bytes[4] == 6 ? @"request" : @"cancel";
-                if (bytes[4] != 8) {
-                    [self logFlow:flow session:session direction:upload ? @"upload" : @"download"
-                           reason:@"bt-file" detail:detail];
-                } else {
-                    [self logFlow:flow session:session direction:@"connection" reason:@"bt-control" detail:detail];
-                }
-                return [NEFilterDataVerdict dropVerdict];
+                if (bytes[4] != 8)
+                    return [self rejectFlow:flow session:session direction:upload ? @"upload" : @"download"
+                                  reason:@"bt-file" detail:detail];
+                return [self rejectFlow:flow session:session direction:@"connection" reason:@"bt-control" detail:detail];
             }
-            [self logFlow:flow session:session direction:@"connection" reason:@"direct-ip"
-                   detail:window.base ? @"other-peer-message" : @"unrecognized-handshake"];
-            return [NEFilterDataVerdict dropVerdict];
+            return [self rejectFlow:flow session:session direction:@"connection" reason:@"direct-ip"
+                          detail:window.base ? @"other-peer-message" : @"unrecognized-handshake"];
         }
         return [NEFilterDataVerdict dataVerdictWithPassBytes:window.base - previous peekBytes:1];
     }
-    [self logFlow:flow session:session direction:@"connection" reason:@"direct-ip"];
-    return [NEFilterDataVerdict dropVerdict];
+    return [self rejectFlow:flow session:session direction:@"connection" reason:@"direct-ip" detail:nil];
 }
 
 - (NEFilterDataVerdict *)inspectStandardBT:(NEFilterFlow *)flow session:(PGSession *)session
@@ -458,8 +555,7 @@ static NEFilterSettings *settingsForSockets(void) {
             session.mode = PGModeDone;
             return [NEFilterDataVerdict allowVerdict];
         }
-        [self logFlow:flow session:session direction:@"connection" reason:@"inspection-offset"];
-        return [NEFilterDataVerdict dropVerdict];
+        return [self rejectFlow:flow session:session direction:@"connection" reason:@"inspection-offset" detail:nil];
     }
     const NSUInteger before = window.base;
     while (window.bytes.length) {
@@ -476,16 +572,14 @@ static NEFilterSettings *settingsForSockets(void) {
                     session.mode = PGModeDone;
                     return [NEFilterDataVerdict allowVerdict];
                 }
-                [self logFlow:flow session:session direction:@"connection" reason:@"bt-control" detail:@"invalid-frame"];
-                return [NEFilterDataVerdict dropVerdict];
+                return [self rejectFlow:flow session:session direction:@"connection" reason:@"bt-control" detail:@"invalid-frame"];
             default:
                 // Release preceding complete metadata before dropping a file
                 // request or piece that arrived in the same read callback.
                 if (window.base > before)
                     return [NEFilterDataVerdict dataVerdictWithPassBytes:window.base - before peekBytes:5];
-                [self logFlow:flow session:session direction:decision.action == PGBlockUpload ? @"upload" : @"download"
-                       reason:@"bt-file" detail:bytes[4] == 7 ? @"piece" : @"request"];
-                return [NEFilterDataVerdict dropVerdict];
+                return [self rejectFlow:flow session:session direction:decision.action == PGBlockUpload ? @"upload" : @"download"
+                              reason:@"bt-file" detail:bytes[4] == 7 ? @"piece" : @"request"];
         }
     }
     return [NEFilterDataVerdict dataVerdictWithPassBytes:window.base - before peekBytes:stream->identified ? 4 : 1];
@@ -504,6 +598,7 @@ static NEFilterSettings *settingsForSockets(void) {
     }
     NEFilterSocketFlow *socket = (NEFilterSocketFlow *)flow;
     @synchronized (session) {
+        if (session.rejected) return [NEFilterDataVerdict dropVerdict];
         if (session.mode == PGModeEndpoint) {
             NSString *host, *port;
             endpointFor(socket, &host, &port);
@@ -518,8 +613,7 @@ static NEFilterSettings *settingsForSockets(void) {
         if (session.mode == PGModeWeb) {
             PGPeekWindow *window = session->windows[incoming];
             if (![window receive:data at:offset limit:2 * TG_MAX_FRAME]) {
-                [self logFlow:flow session:session direction:@"connection" reason:@"inspection-offset" detail:@"Incomplete web prefix"];
-                return [NEFilterDataVerdict dropVerdict];
+                return [self rejectFlow:flow session:session direction:@"connection" reason:@"inspection-offset" detail:@"Incomplete web prefix"];
             }
             const uint8_t *bytes = window.bytes.bytes;
             // Peers can listen on web ports. Inspect both directions so a
@@ -527,8 +621,7 @@ static NEFilterSettings *settingsForSockets(void) {
             if (window.bytes.length && bytes[0] == 19) session.mode = PGModePeer;
             else if (!incoming) return [self inspectAddress:socket session:session data:window.bytes final:NO];
             else {
-                [self logFlow:flow session:session direction:@"connection" reason:@"direct-ip"];
-                return [NEFilterDataVerdict dropVerdict];
+                return [self rejectFlow:flow session:session direction:@"connection" reason:@"direct-ip" detail:nil];
             }
         }
         if (session.mode == PGModePeer || session.mode == PGModeDHT)
@@ -539,16 +632,26 @@ static NEFilterSettings *settingsForSockets(void) {
     }
 }
 - (NEFilterDataVerdict *)handleInboundDataFromFlow:(NEFilterFlow *)flow readBytesStartOffset:(NSUInteger)offset readBytes:(NSData *)data {
-    return [self inspect:flow inbound:YES offset:offset data:data];
+    return [self reportData:[self inspect:flow inbound:YES offset:offset data:data]];
 }
 - (NEFilterDataVerdict *)handleOutboundDataFromFlow:(NEFilterFlow *)flow readBytesStartOffset:(NSUInteger)offset readBytes:(NSData *)data {
-    return [self inspect:flow inbound:NO offset:offset data:data];
+    return [self reportData:[self inspect:flow inbound:NO offset:offset data:data]];
+}
+- (NEFilterDataVerdict *)reportData:(NEFilterDataVerdict *)verdict {
+#if PG_STORE
+    if ([self.filterConfiguration.vendorConfiguration[@"observeLocalFlows"] isEqual:@YES]) {
+        verdict.shouldReport = YES;
+        verdict.statisticsReportFrequency = NEFilterReportFrequencyLow;
+    }
+#endif
+    return verdict;
 }
 - (NEFilterDataVerdict *)complete:(NEFilterFlow *)flow inbound:(BOOL)inbound {
     PGSession *session;
     @synchronized (self.sessions) { session = self.sessions[flow.identifier]; }
     if (!session) return [NEFilterDataVerdict dropVerdict];
     @synchronized (session) {
+        if (session.rejected) return [NEFilterDataVerdict dropVerdict];
         if (session.mode == PGModeWeb && !inbound)
             return [self inspectAddress:(NEFilterSocketFlow *)flow session:session data:NSData.data final:YES];
         if (session.preserveByAddress && session.mode != PGModeDone && session.mode != PGModeBT)
@@ -564,6 +667,9 @@ int main(void) {
     @autoreleasepool {
         auditLog = os_log_create("org.thunderguard.firewall", "packet-evidence");
         [NEProvider startSystemExtensionMode];
+#if PG_STORE
+        [[PGStoreFeedServer shared] start];
+#endif
     }
     dispatch_main();
 }
