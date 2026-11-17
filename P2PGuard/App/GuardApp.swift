@@ -58,16 +58,12 @@ private struct LoginStartupSetting: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             Toggle("登录时启动", isOn: Binding(get: { requested }, set: setStartup))
-                .disabled(status == .notFound)
             Text("登录 Mac 后自动打开护栏。此开关不改变网络拦截规则。")
                 .font(.caption).foregroundStyle(.secondary)
             if status == .requiresApproval {
                 Text("等待在系统设置中允许。")
                     .font(.caption).foregroundStyle(.secondary)
                 Button("打开系统登录项") { SMAppService.openSystemSettingsLoginItems() }
-            } else if status == .notFound {
-                Text("macOS 找不到此 App 的登录项。请从「应用程序」打开护栏后再试。")
-                    .font(.caption).foregroundStyle(.secondary)
             }
             if let failure {
                 Text(failure).font(.caption).foregroundStyle(.red)
