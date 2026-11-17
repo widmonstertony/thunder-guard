@@ -25,7 +25,7 @@ def bundle(path, name, title, identifier, kind, extra):
         'CFBundleDevelopmentRegion': 'zh_CN', 'CFBundleDisplayName': title,
         'CFBundleName': title, 'CFBundleExecutable': name, 'CFBundleIdentifier': identifier,
         'CFBundleInfoDictionaryVersion': '6.0', 'CFBundlePackageType': kind,
-        'CFBundleVersion': '26', 'CFBundleShortVersionString': '0.7.0',
+        'CFBundleVersion': '27', 'CFBundleShortVersionString': '0.7.1',
         'LSMinimumSystemVersion': '14.0', **extra,
     })
     return path / 'Contents/MacOS' / name
@@ -49,6 +49,7 @@ def build(team):
     })
     extension = bundle(filter_bundle, EXTENSION, 'TonTon P2PGuard 网络过滤器', EXTENSION, 'SYSX', {
         'NSSystemExtensionUsageDescription': description,
+        'CFBundleVersion': '26', 'CFBundleShortVersionString': '0.7.0',
         'NetworkExtension': {'NEMachServiceName': f'{group}.service', 'NEProviderClasses': {
             'com.apple.networkextension.filter-data': 'PGFilterProvider'}},
     })

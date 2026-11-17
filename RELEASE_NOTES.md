@@ -1,3 +1,11 @@
+# 0.7.1 — Login at startup
+
+- Added a macOS-backed **登录时启动** switch to Settings and a Settings button in the menu-bar popover. System approval and registration errors are shown without reporting a failed change as enabled.
+- The direct-distribution host is build 27 and retains the previously verified build 26 network filter. Store builds use the same Settings implementation.
+- The installed notarized release passed the login-switch on/off checks and a real reboot. Four controlled BT file-direction checks passed after reboot. Mini remained enabled and LuLu remained disabled.
+- A small native Thunder cloud return matched the public source byte for byte. Sintel’s magnet showed its file list. Ubuntu Desktop and Server magnets showed their file lists when their official HTTPS torrent URLs were supplied as metadata sources; the tracker-only variants still failed to resolve in the test environment.
+- Filtering covers recognized plaintext BitTorrent TCP file messages. This is not a guarantee against every encrypted or proprietary peer protocol.
+
 ## 迅雷护栏 0.3.3（预览版）
 
 - 修复域名正则与 LuLu 完整字符串匹配方式不兼容的问题，恢复迅雷账户和云盘界面所需的子域名连接。

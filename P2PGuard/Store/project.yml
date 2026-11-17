@@ -8,7 +8,7 @@ settings:
     ENABLE_HARDENED_RUNTIME: YES
     SWIFT_VERSION: '5.0'
     MARKETING_VERSION: '0.7.0'
-    CURRENT_PROJECT_VERSION: 26
+    CURRENT_PROJECT_VERSION: 28
     PG_APP_ID: org.thunderguard.firewall.store
     PG_FILTER_ID: org.thunderguard.firewall.store.filter
     PG_GROUP: $(DEVELOPMENT_TEAM).org.thunderguard.firewall.store

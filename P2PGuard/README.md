@@ -1,10 +1,12 @@
-# TonTon P2PGuard · 0.7.0
+# TonTon P2PGuard · 0.7.1
 
 Native macOS monitor and content filter. The host uses SwiftUI and the embedded extension uses Apple's Network Extension API. This target builds with no LuLu source, resources, rules, helper, or login item. The old product and its upstream attribution are preserved in the repository as historical source.
 
 The dashboard starts on **All Apps**. It shows visible connections and denials for the selected app, and can watch an installed app before it is running.
 
 The menu bar shows upload and download speeds. Its popover shows network statistics and recent denials by app; the three denial counters also filter the displayed records. The last ten minutes of BT upload, BT download and other denials each have a separate limit, so IP denials cannot displace BT records.
+
+Use **Settings → 登录时启动** to have macOS open the app when you sign in. The setting reads macOS’s registration state and does not alter filtering rules. Settings are also available from the gear in the network popover.
 
 - **BT files** is an opt-in rule for all apps or an individual app. An app can inherit the global setting, block BT files even when the global setting is off, or be exempt from the global rule. The scope is recognized file request and piece messages on plaintext BitTorrent TCP streams. BitTorrent metadata, ordinary HTTP/TLS, and unrecognized protocols pass. This setting does not detect encrypted BitTorrent, uTP or proprietary peer protocols. Apps whose identity cannot be confirmed can inherit the global setting but have no individual rule.
 - Thunder's optional **IP addresses** rule remains separate in its settings. It uses system hostname information, HTTP Host, TLS SNI and Xunlei CDN handling to preserve named services. On unnamed connections it permits supported plaintext BitTorrent metadata and DHT discovery, and rejects file messages or unsupported direct-to-IP traffic. Existing Thunder rules are migrated without turning on global blocking.

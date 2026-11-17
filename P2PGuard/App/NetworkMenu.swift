@@ -70,6 +70,7 @@ struct NetworkMenu: View {
     @ObservedObject var control: FilterControl
     let dock: DockPresence
     @Environment(\.openWindow) private var openWindow
+    @Environment(\.openSettings) private var openSettings
     @AppStorage("networkInterface") private var interface = ""
     @AppStorage("networkBits") private var bits = false
     @AppStorage("latencyHost") private var latencyHost = "1.1.1.1"
@@ -144,6 +145,11 @@ struct NetworkMenu: View {
             Divider()
             HStack {
                 Button("打开护栏") { dock.showDock(); NSApplication.shared.activate(); openWindow(id: "dashboard") }
+                Button {
+                    dock.showDock(); NSApplication.shared.activate(); openSettings()
+                } label: {
+                    Image(systemName: "gearshape").accessibilityLabel("设置")
+                }.help("设置")
                 Spacer()
                 if tab == .network {
                     Toggle("以位/秒显示", isOn: $bits).controlSize(.small)

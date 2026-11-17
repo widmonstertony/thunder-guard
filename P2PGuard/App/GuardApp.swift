@@ -1,5 +1,6 @@
 import AppKit
 import Charts
+import ServiceManagement
 import SwiftUI
 import UniformTypeIdentifiers
 
@@ -35,6 +36,7 @@ import UniformTypeIdentifiers
         }.menuBarExtraStyle(.window)
         Settings {
             Form {
+                LoginStartupSetting()
                 Toggle("在菜单栏显示下载和上传速度", isOn: $showNetworkMenu)
 #if PG_STORE
                 Link("隐私政策", destination: Self.privacy)
@@ -43,6 +45,58 @@ import UniformTypeIdentifiers
                 .background(DockWindowAnchor(dock: dock))
                 .onChange(of: showNetworkMenu) { _, _ in dock.update() }
         }
+    }
+}
+
+private struct LoginStartupSetting: View {
+    private let service = SMAppService.mainApp
+    @State private var status: SMAppService.Status = .notFound
+    @State private var failure: String?
+
+    private var requested: Bool { status == .enabled || status == .requiresApproval }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Toggle("登录时启动", isOn: Binding(get: { requested }, set: setStartup))
+                .disabled(status == .notFound)
+            Text("登录 Mac 后自动打开护栏。此开关不改变网络拦截规则。")
+                .font(.caption).foregroundStyle(.secondary)
+            if status == .requiresApproval {
+                Text("等待在系统设置中允许。")
+                    .font(.caption).foregroundStyle(.secondary)
+                Button("打开系统登录项") { SMAppService.openSystemSettingsLoginItems() }
+            } else if status == .notFound {
+                Text("macOS 找不到此 App 的登录项。请从「应用程序」打开护栏后再试。")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+            if let failure {
+                Text(failure).font(.caption).foregroundStyle(.red)
+            }
+        }
+        .onAppear(perform: refresh)
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+            refresh()
+            if status == .enabled { failure = nil }
+        }
+    }
+
+    private func refresh() { status = service.status }
+
+    private func setStartup(_ enabled: Bool) {
+        failure = nil
+        refresh()
+        guard enabled != requested else { return }
+        do {
+            if enabled { try service.register() }
+            else { try service.unregister() }
+        } catch {
+            refresh()
+            if enabled != requested {
+                failure = "无法\(enabled ? "开启" : "关闭")登录时启动：\(error.localizedDescription)"
+            }
+            return
+        }
+        refresh()
     }
 }
 
